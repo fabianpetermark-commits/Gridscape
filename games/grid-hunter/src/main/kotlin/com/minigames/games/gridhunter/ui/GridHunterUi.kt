@@ -76,6 +76,8 @@ import com.minigames.games.gridhunter.logic.GridHunterConfig
 import com.minigames.games.gridhunter.logic.GridHunterEngine
 import com.minigames.games.gridhunter.logic.GridHunterState
 import java.util.Locale
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.distinctUntilChangedBy
 
 @Composable
 fun GridHunterScreen(
@@ -115,10 +117,18 @@ fun GridHunterScreen(
         }
     }
 
-    LaunchedEffect(session, state.phase) {
-        if (state.phase == GamePhase.PLAYING) {
-            session.runLoop(stepCadenceMillis = 16L)
-        }
+    // FIX: LaunchedEffect(session, state.phase) helyett Flow.collectLatest,
+    // hogy a runLoop ne szakadjon meg a READY→PLAYING fázisváltáskor.
+    // A collectLatest automatikusan lemondja és újraindítja a blokkot,
+    // ha a phase PLAYING-re vált, és leáll, ha más fázisra lép.
+    LaunchedEffect(session) {
+        session.state
+            .distinctUntilChangedBy { it.phase }
+            .collectLatest { s ->
+                if (s.phase == GamePhase.PLAYING) {
+                    session.runLoop(stepCadenceMillis = 16L)
+                }
+            }
     }
 
     LaunchedEffect(state.phase, state.seed) {
