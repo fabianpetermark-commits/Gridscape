@@ -84,8 +84,7 @@ fun GridHunterScreen(
     difficulty: Difficulty,
     controlMode: ControlMode = ControlMode.HYBRID,
     hapticsEnabled: Boolean = true,
-    bestCompletionTimeMs: Long? = null,
-    onGameFinished: (won: Boolean, completionTimeMs: Long?) -> Unit = { _, _ -> },
+    onGameOver: (elapsedMs: Long, moves: Int, exitsReached: Int) -> Unit = { _, _, _ -> },
     onNavigateBack: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -101,7 +100,7 @@ fun GridHunterScreen(
     }
 
     val state by session.state.collectAsStateWithLifecycle()
-    var resultReportedForSeed by remember { mutableStateOf<Long?>(null) }
+    var gameOverReported by remember { mutableStateOf(false) }
 
     DisposableEffect(lifecycleOwner, session) {
         val observer = LifecycleEventObserver { _, event ->
@@ -112,15 +111,9 @@ fun GridHunterScreen(
             }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-        }
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // FIX: LaunchedEffect(session, state.phase) helyett Flow.collectLatest,
-    // hogy a runLoop ne szakadjon meg a READY→PLAYING fázisváltáskor.
-    // A collectLatest automatikusan lemondja és újraindítja a blokkot,
-    // ha a phase PLAYING-re vált, és leáll, ha más fázisra lép.
     LaunchedEffect(session) {
         session.state
             .distinctUntilChangedBy { it.phase }
@@ -131,24 +124,18 @@ fun GridHunterScreen(
             }
     }
 
-    LaunchedEffect(state.phase, state.seed) {
-        if (state.phase.isTerminal && resultReportedForSeed != state.seed) {
-            resultReportedForSeed = state.seed
-            val won = state.phase == GamePhase.VICTORY
-            if (hapticsEnabled) {
-                haptics.performHapticFeedback(HapticFeedbackType.LongPress)
-            }
-            onGameFinished(won, if (won) state.elapsedPlayTimeMs else null)
+    // GAME_OVER: report once, then show overlay
+    LaunchedEffect(state.phase) {
+        if (state.phase == GamePhase.GAME_OVER && !gameOverReported) {
+            gameOverReported = true
+            if (hapticsEnabled) haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+            onGameOver(state.elapsedPlayTimeMs, state.moveCount, state.exitsReached)
         }
     }
 
     val handleDirectionInput: (Direction) -> Unit = { direction ->
-        if (hapticsEnabled) {
-            haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-        }
-        if (state.phase == GamePhase.READY) {
-            session.start()
-        }
+        if (hapticsEnabled) haptics.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+        if (state.phase == GamePhase.READY) session.start()
         session.dispatchCommand(GridHunterCommand.Move(direction))
     }
 
@@ -164,6 +151,7 @@ fun GridHunterScreen(
             difficulty = difficulty,
             elapsedTimeMs = state.elapsedPlayTimeMs,
             moveCount = state.moveCount,
+            exitsReached = state.exitsReached,
             canPause = state.phase == GamePhase.PLAYING,
             onPauseClick = { session.pause() },
             onBackClick = onNavigateBack,
@@ -186,14 +174,17 @@ fun GridHunterScreen(
                     .aspectRatio(1f),
             )
 
-            if (state.phase != GamePhase.PLAYING) {
+            // Overlay only for READY, PAUSED, GAME_OVER — not VICTORY (continuous play)
+            if (state.phase == GamePhase.READY ||
+                state.phase == GamePhase.PAUSED ||
+                state.phase == GamePhase.GAME_OVER
+            ) {
                 GridHunterPhaseOverlay(
                     state = state,
-                    bestCompletionTimeMs = bestCompletionTimeMs,
                     onStart = { session.start() },
                     onResume = { session.resume() },
                     onRestart = {
-                        resultReportedForSeed = null
+                        gameOverReported = false
                         session.reset(GridHunterConfig.forDifficulty(difficulty))
                     },
                     onExit = onNavigateBack,
@@ -218,6 +209,7 @@ private fun GridHunterTopBar(
     difficulty: Difficulty,
     elapsedTimeMs: Long,
     moveCount: Int,
+    exitsReached: Int,
     canPause: Boolean,
     onPauseClick: () -> Unit,
     onBackClick: () -> Unit,
@@ -247,17 +239,14 @@ private fun GridHunterTopBar(
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = "${formatDurationSeconds(elapsedTimeMs)}   |   MOVES: $moveCount",
+                text = "${formatDurationSeconds(elapsedTimeMs)}  \u2022  \u29bf$exitsReached  \u2022  ${moveCount}mv",
                 color = colors.textSecondary,
                 fontSize = 13.sp,
                 fontFamily = FontFamily.Monospace,
             )
         }
 
-        IconButton(
-            onClick = onPauseClick,
-            enabled = canPause,
-        ) {
+        IconButton(onClick = onPauseClick, enabled = canPause) {
             Icon(
                 imageVector = Icons.Filled.Pause,
                 contentDescription = "Pause",
@@ -303,11 +292,7 @@ fun GridHunterBoardCanvas(
         drawNeonGridBoard(viewport = viewport, colors = colors)
 
         for (obstacle in state.obstacles) {
-            drawNeonObstacleCell(
-                viewport = viewport,
-                point = obstacle,
-                colors = colors,
-            )
+            drawNeonObstacleCell(viewport = viewport, point = obstacle, colors = colors)
         }
 
         drawNeonEntitySquare(
@@ -321,11 +306,6 @@ fun GridHunterBoardCanvas(
         )
 
         for ((enemy, coords) in animatedEnemies) {
-            val accent = if (enemy.role == EnemyRole.INTERCEPTOR) {
-                colors.enemyInterceptorAccent
-            } else {
-                null
-            }
             drawNeonEntitySquare(
                 viewport = viewport,
                 gridX = coords.x,
@@ -334,7 +314,7 @@ fun GridHunterBoardCanvas(
                 glowColor = colors.enemyRedGlow,
                 pulseScale = 1f,
                 insetRatio = 0.18f,
-                innerAccentColor = accent,
+                innerAccentColor = if (enemy.role == EnemyRole.INTERCEPTOR) colors.enemyInterceptorAccent else null,
             )
         }
 
@@ -353,7 +333,6 @@ fun GridHunterBoardCanvas(
 @Composable
 private fun GridHunterPhaseOverlay(
     state: GridHunterState,
-    bestCompletionTimeMs: Long?,
     onStart: () -> Unit,
     onResume: () -> Unit,
     onRestart: () -> Unit,
@@ -371,31 +350,16 @@ private fun GridHunterPhaseOverlay(
             accent = colors.playerCyan
             subtitle = "Reach the green exit. Avoid the red hunters."
         }
-
         GamePhase.PAUSED -> {
             title = "PAUSED"
             accent = colors.accentAmber
-            subtitle = "Time: ${formatDurationSeconds(state.elapsedPlayTimeMs)}"
+            subtitle = "${formatDurationSeconds(state.elapsedPlayTimeMs)}  \u2022  \u29bf${state.exitsReached}"
         }
-
-        GamePhase.VICTORY -> {
-            title = "VICTORY"
-            accent = colors.exitGreen
-            val timeStr = formatDurationSeconds(state.elapsedPlayTimeMs)
-            val isNewRecord = bestCompletionTimeMs == null || state.elapsedPlayTimeMs <= bestCompletionTimeMs
-            subtitle = if (isNewRecord) {
-                "Cleared in $timeStr \u00b7 NEW BEST!"
-            } else {
-                "Cleared in $timeStr \u00b7 Best: ${formatDurationSeconds(bestCompletionTimeMs)}"
-            }
-        }
-
         GamePhase.GAME_OVER -> {
             title = "CAUGHT"
             accent = colors.enemyRed
-            subtitle = "Survived ${formatDurationSeconds(state.elapsedPlayTimeMs)} (${state.moveCount} moves)"
+            subtitle = "Survived ${formatDurationSeconds(state.elapsedPlayTimeMs)}  \u2022  \u29bf${state.exitsReached}  \u2022  ${state.moveCount}mv"
         }
-
         else -> return
     }
 
@@ -410,30 +374,15 @@ private fun GridHunterPhaseOverlay(
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                text = title,
-                color = accent,
-                fontSize = 24.sp,
-                fontWeight = FontWeight.ExtraBold,
-                letterSpacing = 2.sp,
-            )
-
-            Text(
-                text = subtitle,
-                color = colors.textSecondary,
-                fontSize = 13.sp,
-            )
-
+            Text(text = title, color = accent, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 2.sp)
+            Text(text = subtitle, color = colors.textSecondary, fontSize = 13.sp)
             Spacer(modifier = Modifier.height(4.dp))
 
             when (state.phase) {
                 GamePhase.READY -> {
                     Button(
                         onClick = onStart,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = colors.playerCyan,
-                            contentColor = colors.background,
-                        ),
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.playerCyan, contentColor = colors.background),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(Icons.Filled.PlayArrow, contentDescription = null)
@@ -441,60 +390,39 @@ private fun GridHunterPhaseOverlay(
                         Text("START", fontWeight = FontWeight.Bold)
                     }
                 }
-
                 GamePhase.PAUSED -> {
                     Button(
                         onClick = onResume,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = colors.playerCyan,
-                            contentColor = colors.background,
-                        ),
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.playerCyan, contentColor = colors.background),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(Icons.Filled.PlayArrow, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
                         Text("RESUME", fontWeight = FontWeight.Bold)
                     }
-
-                    OutlinedButton(
-                        onClick = onRestart,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
+                    OutlinedButton(onClick = onRestart, modifier = Modifier.fillMaxWidth()) {
                         Icon(Icons.Filled.Refresh, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
                         Text("RESTART")
                     }
-
-                    OutlinedButton(
-                        onClick = onExit,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
+                    OutlinedButton(onClick = onExit, modifier = Modifier.fillMaxWidth()) {
                         Text("MAIN MENU")
                     }
                 }
-
-                GamePhase.VICTORY, GamePhase.GAME_OVER -> {
+                GamePhase.GAME_OVER -> {
                     Button(
                         onClick = onRestart,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = accent,
-                            contentColor = colors.background,
-                        ),
+                        colors = ButtonDefaults.buttonColors(containerColor = colors.enemyRed, contentColor = colors.background),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Icon(Icons.Filled.Refresh, contentDescription = null)
                         Spacer(Modifier.width(6.dp))
                         Text("PLAY AGAIN", fontWeight = FontWeight.Bold)
                     }
-
-                    OutlinedButton(
-                        onClick = onExit,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text("DIFFICULTY / MENU")
+                    OutlinedButton(onClick = onExit, modifier = Modifier.fillMaxWidth()) {
+                        Text("MAIN MENU")
                     }
                 }
-
                 else -> Unit
             }
         }
@@ -515,44 +443,13 @@ fun NeonTouchDpad(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(spacing),
     ) {
-        DpadArrowButton(
-            icon = Icons.Filled.KeyboardArrowUp,
-            contentDescription = "Up",
-            enabled = enabled,
-            onClick = { onDirection(Direction.UP) },
-            modifier = Modifier.size(buttonSize),
-        )
-
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(spacing),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            DpadArrowButton(
-                icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
-                contentDescription = "Left",
-                enabled = enabled,
-                onClick = { onDirection(Direction.LEFT) },
-                modifier = Modifier.size(buttonSize),
-            )
-
+        DpadArrowButton(icon = Icons.Filled.KeyboardArrowUp, contentDescription = "Up", enabled = enabled, onClick = { onDirection(Direction.UP) }, modifier = Modifier.size(buttonSize))
+        Row(horizontalArrangement = Arrangement.spacedBy(spacing), verticalAlignment = Alignment.CenterVertically) {
+            DpadArrowButton(icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "Left", enabled = enabled, onClick = { onDirection(Direction.LEFT) }, modifier = Modifier.size(buttonSize))
             Spacer(modifier = Modifier.size(buttonSize))
-
-            DpadArrowButton(
-                icon = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                contentDescription = "Right",
-                enabled = enabled,
-                onClick = { onDirection(Direction.RIGHT) },
-                modifier = Modifier.size(buttonSize),
-            )
+            DpadArrowButton(icon = Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "Right", enabled = enabled, onClick = { onDirection(Direction.RIGHT) }, modifier = Modifier.size(buttonSize))
         }
-
-        DpadArrowButton(
-            icon = Icons.Filled.KeyboardArrowDown,
-            contentDescription = "Down",
-            enabled = enabled,
-            onClick = { onDirection(Direction.DOWN) },
-            modifier = Modifier.size(buttonSize),
-        )
+        DpadArrowButton(icon = Icons.Filled.KeyboardArrowDown, contentDescription = "Down", enabled = enabled, onClick = { onDirection(Direction.DOWN) }, modifier = Modifier.size(buttonSize))
     }
 }
 
@@ -565,7 +462,6 @@ private fun DpadArrowButton(
     modifier: Modifier = Modifier,
 ) {
     val colors = LocalMiniGamesColors.current
-
     FilledTonalButton(
         onClick = onClick,
         enabled = enabled,
@@ -580,11 +476,7 @@ private fun DpadArrowButton(
         contentPadding = PaddingValues(0.dp),
         modifier = modifier,
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = contentDescription,
-            modifier = Modifier.size(34.dp),
-        )
+        Icon(imageVector = icon, contentDescription = contentDescription, modifier = Modifier.size(34.dp))
     }
 }
 
