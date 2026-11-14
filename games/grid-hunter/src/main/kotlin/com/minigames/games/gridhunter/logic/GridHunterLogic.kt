@@ -517,5 +517,181 @@ object GridHunterLevelGenerator {
 // ============================================================================
 // 6. Grid Hunter Deterministic GameEngine Implementation
 // ============================================================================
-// NOTE: Section 6 (GameEngine implementation) was truncated in the source document.
-// Placeholder — to be added when the full implementation is provided.
+
+class GridHunterEngine : GameEngine<GridHunterState, GridHunterCommand, GridHunterConfig> {
+
+    override fun createInitialState(
+        config: GridHunterConfig,
+        seed: Long,
+    ): GridHunterState = GridHunterLevelGenerator.generate(config = config, seed = seed)
+
+    override fun start(state: GridHunterState): GridHunterState =
+        if (state.phase == GamePhase.READY) {
+            state.copy(phase = GamePhase.PLAYING)
+        } else {
+            state
+        }
+
+    override fun pause(state: GridHunterState): GridHunterState =
+        if (state.phase == GamePhase.PLAYING) {
+            state.copy(phase = GamePhase.PAUSED)
+        } else {
+            state
+        }
+
+    override fun resume(state: GridHunterState): GridHunterState =
+        if (state.phase == GamePhase.PAUSED) {
+            state.copy(phase = GamePhase.PLAYING)
+        } else {
+            state
+        }
+
+    override fun onCommand(
+        state: GridHunterState,
+        command: GridHunterCommand,
+    ): GridHunterState {
+        if (state.phase != GamePhase.PLAYING) return state
+
+        return when (command) {
+            GridHunterCommand.ClearBufferedMove -> state.copy(bufferedDirection = null)
+
+            is GridHunterCommand.Move -> {
+                if (state.playerCooldownRemainingMs > 0L) {
+                    state.copy(bufferedDirection = command.direction)
+                } else {
+                    executePlayerStep(
+                        state = state.copy(bufferedDirection = null),
+                        direction = command.direction,
+                        playerMovedThisTick = false,
+                    )
+                }
+            }
+        }
+    }
+
+    override fun onTick(
+        state: GridHunterState,
+        deltaMillis: Long,
+    ): GridHunterState {
+        if (state.phase != GamePhase.PLAYING || deltaMillis <= 0L) return state
+
+        var current = state.copy(
+            elapsedPlayTimeMs = state.elapsedPlayTimeMs + deltaMillis,
+        )
+        var playerMovedThisTick = false
+
+        if (current.playerCooldownRemainingMs > 0L) {
+            val remaining = (current.playerCooldownRemainingMs - deltaMillis).coerceAtLeast(0L)
+            current = current.copy(playerCooldownRemainingMs = remaining)
+
+            if (remaining == 0L && current.bufferedDirection != null) {
+                val nextDir = current.bufferedDirection
+                current = executePlayerStep(
+                    state = current.copy(bufferedDirection = null),
+                    direction = nextDir,
+                    playerMovedThisTick = false,
+                )
+                playerMovedThisTick = true
+                if (current.phase != GamePhase.PLAYING) {
+                    return current
+                }
+            }
+        }
+
+        var enemies = current.enemies
+        for (index in enemies.indices) {
+            val enemy = enemies[index]
+            val advanceResult = enemy.scheduler.advance(deltaMillis)
+
+            if (advanceResult.stepsToExecute <= 0) {
+                enemies = enemies.replaceAt(index, enemy.copy(scheduler = advanceResult.scheduler))
+                continue
+            }
+
+            val stateViewForAi = current.copy(enemies = enemies)
+            val nextPos = GridHunterAi.chooseNextPosition(stateViewForAi, enemy)
+            val movedEnemy = enemy.copy(
+                previousPosition = enemy.position,
+                position = nextPos,
+                scheduler = advanceResult.scheduler,
+            )
+            enemies = enemies.replaceAt(index, movedEnemy)
+            current = current.copy(enemies = enemies)
+
+            if (hasPlayerEnemyCollision(current.player, movedEnemy, playerMovedThisTick)) {
+                return current.copy(phase = GamePhase.GAME_OVER)
+            }
+        }
+
+        if (isPlayerOnUnoccupiedExit(current)) {
+            return current.copy(phase = GamePhase.VICTORY)
+        }
+
+        return current
+    }
+
+    private fun executePlayerStep(
+        state: GridHunterState,
+        direction: Direction,
+        playerMovedThisTick: Boolean,
+    ): GridHunterState {
+        val candidatePos = state.player.position.step(direction)
+        val isBlocked = !state.bounds.contains(candidatePos) || candidatePos in state.obstacles
+
+        val nextPos = if (isBlocked) state.player.position else candidatePos
+        val moved = nextPos != state.player.position
+
+        val updatedPlayer = state.player.copy(
+            previousPosition = state.player.position,
+            position = nextPos,
+            lastMoveDirection = direction,
+        )
+
+        val updatedState = state.copy(
+            player = updatedPlayer,
+            moveCount = if (moved) state.moveCount + 1 else state.moveCount,
+            playerCooldownRemainingMs = if (moved) state.config.playerMoveCooldownMs else 0L,
+        )
+
+        val collided = updatedState.enemies.any { enemy ->
+            hasPlayerEnemyCollision(
+                player = updatedPlayer,
+                enemy = enemy,
+                simultaneousUpdate = playerMovedThisTick,
+            )
+        }
+        if (collided) {
+            return updatedState.copy(phase = GamePhase.GAME_OVER)
+        }
+
+        if (isPlayerOnUnoccupiedExit(updatedState)) {
+            return updatedState.copy(phase = GamePhase.VICTORY)
+        }
+
+        return updatedState
+    }
+
+    private fun hasPlayerEnemyCollision(
+        player: PlayerEntity,
+        enemy: EnemyEntity,
+        simultaneousUpdate: Boolean,
+    ): Boolean {
+        if (player.position == enemy.position) return true
+
+        if (simultaneousUpdate &&
+            player.previousPosition == enemy.position &&
+            player.position == enemy.previousPosition
+        ) {
+            return true
+        }
+
+        return false
+    }
+
+    private fun isPlayerOnUnoccupiedExit(state: GridHunterState): Boolean =
+        state.player.position == state.exitPosition &&
+            state.enemies.none { it.position == state.exitPosition }
+
+    private fun <T> List<T>.replaceAt(index: Int, item: T): List<T> =
+        mapIndexed { i, existing -> if (i == index) item else existing }
+}
