@@ -36,9 +36,15 @@ dependencies {
     api(project(":core:models"))
     api(project(":core:engine"))
     api(project(":core:input"))
+    api(project(":core:rendering"))
 
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
+    implementation(libs.compose.ui.graphics)
+    implementation(libs.compose.foundation)
+    implementation(libs.compose.material3)
+    implementation(libs.compose.material.icons.extended)
+    implementation(libs.androidx.lifecycle.runtime.compose)
 
     testImplementation(libs.junit.jupiter)
     testImplementation(libs.kotlinx.coroutines.test)
