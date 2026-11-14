@@ -22,7 +22,7 @@ object GridHunterMeta {
     val DESCRIPTOR = GameDescriptor(
         id = ID,
         title = "Grid Hunter",
-        subtitle = "Outsmart neon hunters on a 6×6 grid",
+        subtitle = "Outsmart neon hunters on an 8×8 grid",
         supportedDifficulties = Difficulty.entries,
     )
 }
@@ -34,7 +34,7 @@ enum class EnemyRole {
 
 data class GridHunterConfig(
     val difficulty: Difficulty,
-    val bounds: GridBounds = GridBounds(width = 6, height = 6),
+    val bounds: GridBounds = GridBounds(width = 8, height = 8),
     val pursuerIntervalMs: Long = 750L,
     val interceptorIntervalMs: Long = 750L,
     val playerMoveCooldownMs: Long = 80L,
@@ -73,7 +73,7 @@ data class GridHunterConfig(
                 difficulty = Difficulty.INSANE,
                 pursuerIntervalMs = 450L,
                 interceptorIntervalMs = 500L,
-                obstacleCountRange = 5..8,
+                obstacleCountRange = 5..10,
             )
         }
     }
@@ -111,6 +111,7 @@ data class GridHunterState(
     val exitPosition: GridPoint,
     val obstacles: Set<GridPoint> = emptySet(),
     val moveCount: Int = 0,
+    val exitsReached: Int = 0,
     val playerCooldownRemainingMs: Long = 0L,
     val bufferedDirection: Direction? = null,
     val seed: Long = 0L,
@@ -343,8 +344,8 @@ object GridHunterAi {
 object GridHunterLevelGenerator {
 
     private const val MAX_GENERATION_ATTEMPTS = 250
-    private const val MIN_PLAYER_EXIT_DISTANCE = 4
-    private const val MIN_PLAYER_ENEMY_DISTANCE = 4
+    private const val MIN_PLAYER_EXIT_DISTANCE = 5
+    private const val MIN_PLAYER_ENEMY_DISTANCE = 5
 
     fun generate(
         config: GridHunterConfig,
@@ -361,6 +362,39 @@ object GridHunterLevelGenerator {
         }
 
         return createDeterministicFallback(config, seed)
+    }
+
+    /**
+     * Generates a new round layout keeping the existing state's elapsedPlayTimeMs,
+     * moveCount, exitsReached, and seed. Used for continuous play after exit reached.
+     */
+    fun generateNextRound(
+        existingState: GridHunterState,
+        roundSeed: Long = System.nanoTime(),
+    ): GridHunterState {
+        val config = existingState.config
+        val random = Random(roundSeed)
+        val allPoints = config.bounds.allPoints()
+
+        repeat(MAX_GENERATION_ATTEMPTS) {
+            val candidate = tryGenerateCandidate(config, allPoints, random, roundSeed)
+            if (candidate != null) {
+                return candidate.copy(
+                    elapsedPlayTimeMs = existingState.elapsedPlayTimeMs,
+                    moveCount = existingState.moveCount,
+                    exitsReached = existingState.exitsReached + 1,
+                    phase = GamePhase.PLAYING,
+                )
+            }
+        }
+
+        val fallback = createDeterministicFallback(config, roundSeed)
+        return fallback.copy(
+            elapsedPlayTimeMs = existingState.elapsedPlayTimeMs,
+            moveCount = existingState.moveCount,
+            exitsReached = existingState.exitsReached + 1,
+            phase = GamePhase.PLAYING,
+        )
     }
 
     private fun tryGenerateCandidate(
@@ -623,8 +657,9 @@ class GridHunterEngine : GameEngine<GridHunterState, GridHunterCommand, GridHunt
             }
         }
 
+        // Exit reached: generate next round seamlessly, no VICTORY screen
         if (isPlayerOnUnoccupiedExit(current)) {
-            return current.copy(phase = GamePhase.VICTORY)
+            return GridHunterLevelGenerator.generateNextRound(current)
         }
 
         return current
@@ -664,8 +699,9 @@ class GridHunterEngine : GameEngine<GridHunterState, GridHunterCommand, GridHunt
             return updatedState.copy(phase = GamePhase.GAME_OVER)
         }
 
+        // Exit reached via player command: generate next round seamlessly
         if (isPlayerOnUnoccupiedExit(updatedState)) {
-            return updatedState.copy(phase = GamePhase.VICTORY)
+            return GridHunterLevelGenerator.generateNextRound(updatedState)
         }
 
         return updatedState
