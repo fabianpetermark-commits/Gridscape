@@ -97,8 +97,9 @@ data class EnemyEntity(
     val position: GridPoint,
     val previousPosition: GridPoint = position,
     val scheduler: IntervalScheduler,
-    // Seeded per-enemy random offset for interceptor jitter; stable across ticks.
-    val interceptorJitterSeed: Long = id.toLong() * 0x9e3779b97f4a7c15L,
+    // Signed decimal form of 0x9e3779b97f4a7c15 (Fibonacci hashing constant).
+    // Used as a per-enemy jitter seed; avoids hex overflow in Kotlin strict mode.
+    val interceptorJitterSeed: Long = id.toLong() * -7046029254386353131L,
 )
 
 data class GridHunterState(
@@ -212,23 +213,6 @@ object GridPathfinder {
 
 object GridHunterAi {
 
-    /**
-     * Chooses the next position for [enemy].
-     *
-     * Coordination (HARD / INSANE, 2 hunters):
-     * - If the Pursuer is within [PINCER_CLOSE_DIST] of the player, the Interceptor
-     *   attempts a pincer: it moves to the orthogonal side of the player that is
-     *   farthest from the Pursuer, cutting off the escape corridor from the opposite
-     *   direction. This prevents the player from simply running away from one hunter.
-     * - If the Interceptor has already reached an adjacent cell of the player, the
-     *   Pursuer ignores flanking logic and closes in directly for the kill.
-     *
-     * Interceptor jitter (MEDIUM / HARD / INSANE):
-     * - Instead of always targeting the exact midpoint of the escape path, the
-     *   Interceptor samples several candidate chokepoints around the midpoint and
-     *   picks one using a per-enemy deterministic seed so the choice varies between
-     *   enemies and rounds but stays stable within a tick (not flickering).
-     */
     fun chooseNextPosition(
         state: GridHunterState,
         enemy: EnemyEntity,
@@ -264,10 +248,6 @@ object GridHunterAi {
             ?: enemy.position
     }
 
-    // -------------------------------------------------------------------------
-    // Role resolution
-    // -------------------------------------------------------------------------
-
     private const val PINCER_CLOSE_DIST = 3
 
     private fun resolveEffectiveRole(
@@ -275,9 +255,7 @@ object GridHunterAi {
         enemy: EnemyEntity,
         otherEnemies: List<EnemyEntity>,
     ): EnemyRole {
-        val difficulty = state.config.difficulty
-        // Dynamic role swap only on INSANE with 2+ hunters
-        if (difficulty != Difficulty.INSANE || otherEnemies.isEmpty()) return enemy.role
+        if (state.config.difficulty != Difficulty.INSANE || otherEnemies.isEmpty()) return enemy.role
 
         val other = otherEnemies.first()
         val myDist = enemy.position.manhattanDistanceTo(state.player.position)
@@ -292,10 +270,6 @@ object GridHunterAi {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Pursuer target selection
-    // -------------------------------------------------------------------------
-
     private fun selectPursuerTarget(
         state: GridHunterState,
         enemy: EnemyEntity,
@@ -305,23 +279,18 @@ object GridHunterAi {
         val playerPos = state.player.position
         val difficulty = state.config.difficulty
 
-        // Coordination: if the Interceptor is already adjacent to the player,
-        // the Pursuer ignores flanking and closes in directly for the kill.
         val interceptorAdjacent = otherEnemies.any { other ->
             other.role == EnemyRole.INTERCEPTOR &&
                 other.position.isOrthogonallyAdjacentTo(playerPos)
         }
         if (interceptorAdjacent) return playerPos
 
-        // On HARD/INSANE try to flank an open orthogonal side of the player
         if (difficulty == Difficulty.HARD || difficulty == Difficulty.INSANE) {
             val flankingSpot = state.bounds.validNeighbors(playerPos)
                 .filter { it !in blocked && it != enemy.position }
                 .minByOrNull { it.manhattanDistanceTo(enemy.position) }
 
-            if (flankingSpot != null &&
-                enemy.position.manhattanDistanceTo(playerPos) in 2..3
-            ) {
+            if (flankingSpot != null && enemy.position.manhattanDistanceTo(playerPos) in 2..3) {
                 return flankingSpot
             }
         }
@@ -329,16 +298,6 @@ object GridHunterAi {
         return playerPos
     }
 
-    // -------------------------------------------------------------------------
-    // Interceptor target selection (with pincer + jitter)
-    // -------------------------------------------------------------------------
-
-    /**
-     * Jitter window: the interceptor randomly samples one of up to [JITTER_WINDOW]
-     * candidates around the ideal chokepoint index on the escape path.
-     * The sample is seeded by (enemy.interceptorJitterSeed XOR elapsedPlayTimeMs / 500)
-     * so it changes roughly every half-second rather than every tick.
-     */
     private const val JITTER_WINDOW = 3
 
     private fun selectInterceptorTarget(
@@ -350,12 +309,8 @@ object GridHunterAi {
         val playerPos = state.player.position
         val distToPlayer = enemy.position.manhattanDistanceTo(playerPos)
 
-        // Close-range kill switch: stop leading and strike directly
         if (distToPlayer <= 2) return playerPos
 
-        // Pincer coordination (HARD / INSANE):
-        // If the Pursuer is close, move to the side of the player opposite the Pursuer
-        // so the two hunters form a pincer from different directions.
         val difficulty = state.config.difficulty
         if ((difficulty == Difficulty.HARD || difficulty == Difficulty.INSANE) &&
             otherEnemies.isNotEmpty()
@@ -369,7 +324,6 @@ object GridHunterAi {
             }
         }
 
-        // Escape path interception with jitter
         val escapePath = GridPathfinder.findShortestPath(
             bounds = state.bounds,
             start = playerPos,
@@ -380,7 +334,6 @@ object GridHunterAi {
         if (escapePath.size >= 3) {
             val idealIndex = (escapePath.size / 2).coerceIn(1, escapePath.size - 2)
 
-            // Build candidate indices within the jitter window, clamped to valid range
             val candidates = (-JITTER_WINDOW..JITTER_WINDOW)
                 .map { offset -> (idealIndex + offset).coerceIn(1, escapePath.size - 2) }
                 .distinct()
@@ -388,17 +341,11 @@ object GridHunterAi {
                 .filter { it !in blocked }
 
             if (candidates.isNotEmpty()) {
-                // Stable per-enemy, per-half-second seed so it doesn't flicker every tick
-                val jitterSeed = enemy.interceptorJitterSeed xor
-                    (state.elapsedPlayTimeMs / 500L)
-                val chosen = candidates[
-                    (Random(jitterSeed).nextInt(candidates.size))
-                ]
-                return chosen
+                val jitterSeed = enemy.interceptorJitterSeed xor (state.elapsedPlayTimeMs / 500L)
+                return candidates[Random(jitterSeed).nextInt(candidates.size)]
             }
         }
 
-        // Fallback: project 1-2 cells ahead along the player's last movement direction
         val dir = state.player.lastMoveDirection
         if (dir != null) {
             val twoAhead = playerPos.step(dir).step(dir)
@@ -410,10 +357,6 @@ object GridHunterAi {
         return playerPos
     }
 
-    /**
-     * Pincer: finds the orthogonal neighbor of the player that is farthest from [pursuer]
-     * and reachable by [interceptor], so the two hunters approach from opposite sides.
-     */
     private fun selectPincerSide(
         state: GridHunterState,
         interceptor: EnemyEntity,
@@ -423,7 +366,6 @@ object GridHunterAi {
         val playerPos = state.player.position
         return state.bounds.validNeighbors(playerPos)
             .filter { it !in blocked }
-            // Prefer the side farthest from the pursuer (maximize pincer spread)
             .maxByOrNull { candidate ->
                 candidate.manhattanDistanceTo(pursuer.position) -
                     candidate.manhattanDistanceTo(interceptor.position)
@@ -435,16 +377,16 @@ object GridHunterAi {
 // 5. Randomized & Fairness-Validated Level Generator
 // ============================================================================
 
+// Signed decimal of 0x9e3779b97f4a7c15 (Fibonacci hashing constant, fits Long).
+private const val JITTER_HASH_CONST = -7046029254386353131L
+
 object GridHunterLevelGenerator {
 
     private const val MAX_GENERATION_ATTEMPTS = 250
     private const val MIN_PLAYER_EXIT_DISTANCE = 5
     private const val MIN_PLAYER_ENEMY_DISTANCE = 5
 
-    fun generate(
-        config: GridHunterConfig,
-        seed: Long = System.nanoTime(),
-    ): GridHunterState {
+    fun generate(config: GridHunterConfig, seed: Long = System.nanoTime()): GridHunterState {
         val random = Random(seed)
         val allPoints = config.bounds.allPoints()
 
@@ -513,9 +455,7 @@ object GridHunterLevelGenerator {
             chosenEnemyPositions.add(enemyPos)
         }
 
-        val reserved = buildSet {
-            add(playerPos); add(exitPos); addAll(chosenEnemyPositions)
-        }
+        val reserved = buildSet { add(playerPos); add(exitPos); addAll(chosenEnemyPositions) }
 
         val targetObstacleCount = if (config.obstacleCountRange.last > 0) {
             config.obstacleCountRange.random(random)
@@ -541,7 +481,7 @@ object GridHunterLevelGenerator {
                 position = pos,
                 previousPosition = pos,
                 scheduler = IntervalScheduler(intervalMs = interval),
-                interceptorJitterSeed = (seed xor ((index + 1).toLong() * 0x9e3779b97f4a7c15L)),
+                interceptorJitterSeed = seed xor ((index + 1).toLong() * JITTER_HASH_CONST),
             )
         }
 
@@ -606,7 +546,7 @@ object GridHunterLevelGenerator {
                 position = pos,
                 previousPosition = pos,
                 scheduler = IntervalScheduler(intervalMs = interval),
-                interceptorJitterSeed = (seed xor ((index + 1).toLong() * 0x9e3779b97f4a7c15L)),
+                interceptorJitterSeed = seed xor ((index + 1).toLong() * JITTER_HASH_CONST),
             )
         }
 
