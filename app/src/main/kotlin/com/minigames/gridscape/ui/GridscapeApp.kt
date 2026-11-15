@@ -17,8 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -135,8 +133,6 @@ fun GridscapeApp(
                 DifficultySelectScreen(
                     game = GridHunterMeta.DESCRIPTOR,
                     statsByDifficulty = gridHunterStats,
-                    showControlHints = settings.showControlHints,
-                    controlMode = settings.controlMode,
                     onStartDifficulty = { difficulty ->
                         route = AppRoute.Playing(difficulty)
                     },
@@ -256,8 +252,6 @@ private fun MainMenuScreen(
 private fun DifficultySelectScreen(
     game: GameDescriptor,
     statsByDifficulty: Map<Difficulty, GameStats>,
-    showControlHints: Boolean,
-    controlMode: ControlMode,
     onStartDifficulty: (Difficulty) -> Unit,
     onResetStats: () -> Unit,
     onBack: () -> Unit,
@@ -313,7 +307,7 @@ private fun DifficultySelectScreen(
             }
 
             Text(
-                text = "NEHÉZSÉG VÁLASZTÁSA",
+                text = "CHOOSE DIFFICULTY",
                 color = colors.playerCyan,
                 fontSize = 18.sp,
                 fontWeight = FontWeight.Bold,
@@ -329,85 +323,60 @@ private fun DifficultySelectScreen(
             }
         }
 
-        if (showControlHints) {
-            Spacer(modifier = Modifier.height(8.dp))
-            Surface(
-                color = colors.surfaceElevated,
-                shape = RoundedCornerShape(12.dp),
-                border = BorderStroke(1.dp, colors.boardGridLine),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                val hintText = when (controlMode) {
-                    ControlMode.HYBRID -> "Controls: Swipe on board or use D-Pad. First move starts the clock."
-                    ControlMode.SWIPE -> "Controls: Swipe anywhere on the 8\u00d78 grid to move."
-                    ControlMode.DPAD -> "Controls: Tap the directional D-Pad below the grid."
-                }
-                Text(
-                    text = hintText,
-                    color = colors.textSecondary,
-                    fontSize = 12.sp,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                )
-            }
-        }
+        Spacer(modifier = Modifier.height(18.dp))
 
-        Spacer(modifier = Modifier.height(14.dp))
-
-        LazyColumn(
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(bottom = 24.dp),
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            items(game.supportedDifficulties, key = { it.name }) { difficulty ->
-                val stats = statsByDifficulty[difficulty] ?: GameStats()
-                val accent = difficultyAccentColor(difficulty)
-
-                Surface(
-                    color = colors.surface,
-                    shape = RoundedCornerShape(16.dp),
-                    border = BorderStroke(1.2.dp, accent.copy(alpha = 0.55f)),
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { onStartDifficulty(difficulty) },
+            game.supportedDifficulties.chunked(2).forEach { difficultyRow ->
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
-                    Row(
-                        modifier = Modifier
-                            .padding(16.dp)
-                            .fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = difficulty.name,
-                                color = accent,
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                letterSpacing = 1.4.sp,
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = gridHunterDifficultySummary(difficulty),
-                                color = colors.textSecondary,
-                                fontSize = 12.sp,
-                            )
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Text(
-                                text = "PLAYED: ${stats.gamesPlayed}  \u2022  BEST: ${stats.bestCompletionTimeMs?.let { String.format(Locale.US, "%.2fs", it / 1000.0) } ?: "--"}",
-                                color = colors.textPrimary,
-                                fontSize = 12.sp,
-                                fontFamily = FontFamily.Monospace,
-                            )
-                        }
+                    difficultyRow.forEach { difficulty ->
+                        val stats = statsByDifficulty[difficulty] ?: GameStats()
+                        val accent = difficultyAccentColor(difficulty)
 
-                        Spacer(modifier = Modifier.width(12.dp))
-
-                        OutlinedButton(
-                            onClick = { onStartDifficulty(difficulty) },
-                            border = BorderStroke(1.dp, accent),
-                            colors = ButtonDefaults.outlinedButtonColors(contentColor = accent),
+                        Surface(
+                            color = accent.copy(alpha = 0.18f),
+                            shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.2.dp, accent.copy(alpha = 0.9f)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(158.dp)
+                                .clickable { onStartDifficulty(difficulty) },
                         ) {
-                            Text("START", fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 12.dp, vertical = 12.dp),
+                                verticalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Text(
+                                    text = difficulty.name,
+                                    color = accent,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    letterSpacing = 1.1.sp,
+                                )
+                                Text(
+                                    text = gridHunterDifficultySummary(difficulty),
+                                    color = colors.textPrimary,
+                                    fontSize = 11.sp,
+                                    lineHeight = 14.sp,
+                                )
+                                Text(
+                                    text = "PLAYED: ${stats.gamesPlayed}\nBEST: ${stats.bestCompletionTimeMs?.let { String.format(Locale.US, "%.2fs", it / 1000.0) } ?: "--"}",
+                                    color = colors.textPrimary,
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                )
+                            }
                         }
+                    }
+                    if (difficultyRow.size == 1) {
+                        Spacer(modifier = Modifier.weight(1f))
                     }
                 }
             }
