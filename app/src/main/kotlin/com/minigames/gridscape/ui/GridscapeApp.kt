@@ -53,6 +53,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
 import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.minigames.core.input.ControlMode
 import com.minigames.core.models.Difficulty
@@ -109,7 +111,7 @@ fun GridscapeApp(
                 MainMenuScreen(
                     onStart = { route = AppRoute.DifficultySelect },
                     onOpenSettings = { route = AppRoute.Settings },
-                    onExit = { (context as? Activity)?.finish() },
+                    onExit = { context.findActivity()?.finish() },
                 )
             }
 
@@ -566,4 +568,10 @@ private fun gridHunterDifficultySummary(difficulty: Difficulty): String = when (
     Difficulty.MEDIUM -> "1 Fast Interceptor (350ms) \u00b7 Cuts off escape path"
     Difficulty.HARD -> "2 Hunters (500ms) \u00b7 Coordinated pursuit & flank"
     Difficulty.INSANE -> "2 Dynamic Hunters (450\u2013500ms) \u00b7 5\u201310 Obstacles"
+}
+
+private tailrec fun Context.findActivity(): Activity? = when (this) {
+    is Activity -> this
+    is ContextWrapper -> baseContext.findActivity()
+    else -> null
 }
