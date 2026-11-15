@@ -1,6 +1,7 @@
 package com.minigames.core.engine
 
 import com.minigames.core.models.GamePhase
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.coroutines.coroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -17,10 +18,6 @@ object MonotonicTimeSource : TimeSource {
     override fun nowMillis(): Long = System.nanoTime() / 1_000_000L
 }
 
-/**
- * Immutable discrete timer accumulator for scheduled game events (such as enemy steps).
- * Clamps single-tick execution to [maxStepsPerTick] to prevent multi-cell jumps on lag spikes.
- */
 data class IntervalScheduler(
     val intervalMs: Long,
     val accumulatedMs: Long = 0L,
@@ -64,37 +61,24 @@ interface GameState {
     val elapsedPlayTimeMs: Long
 }
 
-/**
- * Pure, deterministic state transition contract implemented by every game module.
- */
 interface GameEngine<S : GameState, C, Config> {
-
-    /** Creates a new session in [GamePhase.READY]. */
     fun createInitialState(config: Config, seed: Long = System.nanoTime()): S
-
-    /** Transitions from [GamePhase.READY] to [GamePhase.PLAYING]. */
     fun start(state: S): S
-
-    /** Transitions from [GamePhase.PLAYING] to [GamePhase.PAUSED]. */
     fun pause(state: S): S
-
-    /** Transitions from [GamePhase.PAUSED] to [GamePhase.PLAYING]. */
     fun resume(state: S): S
-
-    /** Applies a discrete player command (e.g., directional move). */
     fun onCommand(state: S, command: C): S
-
-    /** Advances time-driven simulation (enemy AI ticks, timers, collision checks). */
     fun onTick(state: S, deltaMillis: Long): S
 }
 
+private const val NO_TICK = -1L
+
 /**
- * Lifecycle-aware session coordinator that decouples logic ticks from Compose Canvas FPS.
+ * Lifecycle-aware session coordinator.
  *
- * Host lifecycle rules:
- * - [onHostBackgrounded] transitions active play into [GamePhase.PAUSED] and clears the frame clock.
- * - [onHostForegrounded] resets the frame clock without advancing simulation time, keeping the game
- *   in [GamePhase.PAUSED] until the player explicitly calls [resume] so no catch-up spike occurs.
+ * KEY FIX: [lastTickMillis] is an [AtomicLong] read and written OUTSIDE [_state.update].
+ * The update lambda is retriable on CAS conflict — mutating external state inside it
+ * caused the classic "delta = 0 every tick" bug where onTick was never called with a
+ * non-zero delta, so enemies never moved.
  */
 class GameSession<S : GameState, C, Config>(
     private val engine: GameEngine<S, C, Config>,
@@ -106,17 +90,17 @@ class GameSession<S : GameState, C, Config>(
     private val _state = MutableStateFlow(engine.createInitialState(initialConfig, initialSeed))
     val state: StateFlow<S> = _state.asStateFlow()
 
-    private var lastTickMillis: Long? = null
+    private val lastTickMillis = AtomicLong(NO_TICK)
 
     fun reset(config: Config, seed: Long = System.nanoTime()) {
-        lastTickMillis = null
+        lastTickMillis.set(NO_TICK)
         _state.value = engine.createInitialState(config, seed)
     }
 
     fun start() {
         _state.update { current ->
             if (current.phase == GamePhase.READY) {
-                lastTickMillis = timeSource.nowMillis()
+                lastTickMillis.set(timeSource.nowMillis())
                 engine.start(current)
             } else {
                 current
@@ -127,7 +111,7 @@ class GameSession<S : GameState, C, Config>(
     fun pause() {
         _state.update { current ->
             if (current.phase == GamePhase.PLAYING) {
-                lastTickMillis = null
+                lastTickMillis.set(NO_TICK)
                 engine.pause(current)
             } else {
                 current
@@ -138,7 +122,7 @@ class GameSession<S : GameState, C, Config>(
     fun resume() {
         _state.update { current ->
             if (current.phase == GamePhase.PAUSED) {
-                lastTickMillis = timeSource.nowMillis()
+                lastTickMillis.set(timeSource.nowMillis())
                 engine.resume(current)
             } else {
                 current
@@ -146,51 +130,40 @@ class GameSession<S : GameState, C, Config>(
         }
     }
 
-    fun onHostBackgrounded() {
-        pause()
-    }
+    fun onHostBackgrounded() { pause() }
 
-    fun onHostForegrounded() {
-        lastTickMillis = null
-    }
+    fun onHostForegrounded() { lastTickMillis.set(NO_TICK) }
 
     fun dispatchCommand(command: C) {
         _state.update { current ->
-            if (current.phase == GamePhase.PLAYING) {
-                engine.onCommand(current, command)
-            } else {
-                current
-            }
+            if (current.phase == GamePhase.PLAYING) engine.onCommand(current, command) else current
         }
     }
 
     /**
-     * Advances the simulation by a single clamped time step.
-     * Useful both inside [runLoop] and in deterministic unit tests.
+     * Advances the simulation by one clamped time step.
+     * [lastTickMillis] is read/written outside [_state.update] — the lambda never
+     * mutates external state and can safely retry without corrupting the clock.
      */
     fun stepClock() {
+        if (_state.value.phase != GamePhase.PLAYING) {
+            lastTickMillis.set(NO_TICK)
+            return
+        }
+
         val now = timeSource.nowMillis()
-        _state.update { current ->
-            if (current.phase != GamePhase.PLAYING) {
-                lastTickMillis = null
-                return@update current
-            }
+        val previous = lastTickMillis.getAndSet(now)
 
-            val previous = lastTickMillis
-            lastTickMillis = now
-            if (previous == null) {
-                return@update current
-            }
+        if (previous == NO_TICK) return  // first tick after start, skip to avoid huge delta
 
-            val delta = (now - previous).coerceIn(0L, maxDeltaMillis)
-            if (delta == 0L) current else engine.onTick(current, delta)
+        val delta = (now - previous).coerceIn(0L, maxDeltaMillis)
+        if (delta == 0L) return
+
+        _state.update { s ->
+            if (s.phase == GamePhase.PLAYING) engine.onTick(s, delta) else s
         }
     }
 
-    /**
-     * Runs the fixed-cadence logic loop while the caller's coroutine scope is active.
-     * Pair with Jetpack Compose `LaunchedEffect(session, phase)` or `repeatOnLifecycle`.
-     */
     suspend fun runLoop(stepCadenceMillis: Long = 16L) {
         while (coroutineContext.isActive && _state.value.phase == GamePhase.PLAYING) {
             stepClock()
