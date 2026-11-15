@@ -21,7 +21,7 @@ object GridHunterMeta {
 
     val DESCRIPTOR = GameDescriptor(
         id = ID,
-        title = "Grid Hunter",
+        title = "Gridscape",
         subtitle = "Outsmart neon hunters on an 8×8 grid",
         supportedDifficulties = Difficulty.entries,
     )
@@ -627,6 +627,7 @@ class GridHunterEngine : GameEngine<GridHunterState, GridHunterCommand, GridHunt
 
             if (advanceResult.stepsToExecute <= 0) {
                 enemies = enemies.replaceAt(index, enemy.copy(scheduler = advanceResult.scheduler))
+                current = current.copy(enemies = enemies)
                 continue
             }
 
