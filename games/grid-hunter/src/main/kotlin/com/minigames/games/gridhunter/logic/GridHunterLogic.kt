@@ -54,21 +54,18 @@ data class GridHunterConfig(
                 interceptorIntervalMs = 750L,
                 obstacleCountRange = 0..0,
             )
-
             Difficulty.MEDIUM -> GridHunterConfig(
                 difficulty = Difficulty.MEDIUM,
                 pursuerIntervalMs = 350L,
                 interceptorIntervalMs = 350L,
                 obstacleCountRange = 0..0,
             )
-
             Difficulty.HARD -> GridHunterConfig(
                 difficulty = Difficulty.HARD,
                 pursuerIntervalMs = 500L,
                 interceptorIntervalMs = 500L,
                 obstacleCountRange = 0..0,
             )
-
             Difficulty.INSANE -> GridHunterConfig(
                 difficulty = Difficulty.INSANE,
                 pursuerIntervalMs = 450L,
@@ -100,6 +97,8 @@ data class EnemyEntity(
     val position: GridPoint,
     val previousPosition: GridPoint = position,
     val scheduler: IntervalScheduler,
+    // Seeded per-enemy random offset for interceptor jitter; stable across ticks.
+    val interceptorJitterSeed: Long = id.toLong() * 0x9e3779b97f4a7c15L,
 )
 
 data class GridHunterState(
@@ -144,9 +143,7 @@ object GridPathfinder {
 
         while (queue.isNotEmpty()) {
             val current = queue.removeFirst()
-            if (current == goal) {
-                return reconstructPath(parentByPoint, goal)
-            }
+            if (current == goal) return reconstructPath(parentByPoint, goal)
 
             for (next in bounds.validNeighbors(current)) {
                 if (next !in blockedCells && next !in parentByPoint) {
@@ -210,28 +207,41 @@ object GridPathfinder {
 }
 
 // ============================================================================
-// 4. Difficulty-Aware AI (Pursuer, Interceptor, Flanking & Dynamic Roles)
+// 4. Difficulty-Aware AI (Pursuer, Interceptor, Pincer Coordination & Jitter)
 // ============================================================================
 
 object GridHunterAi {
 
+    /**
+     * Chooses the next position for [enemy].
+     *
+     * Coordination (HARD / INSANE, 2 hunters):
+     * - If the Pursuer is within [PINCER_CLOSE_DIST] of the player, the Interceptor
+     *   attempts a pincer: it moves to the orthogonal side of the player that is
+     *   farthest from the Pursuer, cutting off the escape corridor from the opposite
+     *   direction. This prevents the player from simply running away from one hunter.
+     * - If the Interceptor has already reached an adjacent cell of the player, the
+     *   Pursuer ignores flanking logic and closes in directly for the kill.
+     *
+     * Interceptor jitter (MEDIUM / HARD / INSANE):
+     * - Instead of always targeting the exact midpoint of the escape path, the
+     *   Interceptor samples several candidate chokepoints around the midpoint and
+     *   picks one using a per-enemy deterministic seed so the choice varies between
+     *   enemies and rounds but stays stable within a tick (not flickering).
+     */
     fun chooseNextPosition(
         state: GridHunterState,
         enemy: EnemyEntity,
     ): GridPoint {
         val bounds = state.bounds
-        val otherEnemyPositions = state.enemies
-            .asSequence()
-            .filter { it.id != enemy.id }
-            .map { it.position }
-            .toSet()
-
+        val otherEnemies = state.enemies.filter { it.id != enemy.id }
+        val otherEnemyPositions = otherEnemies.map { it.position }.toSet()
         val blocked = state.obstacles + otherEnemyPositions
-        val effectiveRole = resolveEffectiveRole(state, enemy)
+        val effectiveRole = resolveEffectiveRole(state, enemy, otherEnemies)
 
         val targetCell = when (effectiveRole) {
-            EnemyRole.PURSUER -> selectPursuerTarget(state, enemy, blocked)
-            EnemyRole.INTERCEPTOR -> selectInterceptorTarget(state, enemy, blocked, otherEnemyPositions)
+            EnemyRole.PURSUER -> selectPursuerTarget(state, enemy, blocked, otherEnemies)
+            EnemyRole.INTERCEPTOR -> selectInterceptorTarget(state, enemy, blocked, otherEnemies)
         }
 
         val step = GridPathfinder.nextStep(
@@ -254,58 +264,112 @@ object GridHunterAi {
             ?: enemy.position
     }
 
+    // -------------------------------------------------------------------------
+    // Role resolution
+    // -------------------------------------------------------------------------
+
+    private const val PINCER_CLOSE_DIST = 3
+
     private fun resolveEffectiveRole(
         state: GridHunterState,
         enemy: EnemyEntity,
+        otherEnemies: List<EnemyEntity>,
     ): EnemyRole {
-        if (state.config.difficulty != Difficulty.INSANE || state.enemies.size < 2) {
-            return enemy.role
-        }
+        val difficulty = state.config.difficulty
+        // Dynamic role swap only on INSANE with 2+ hunters
+        if (difficulty != Difficulty.INSANE || otherEnemies.isEmpty()) return enemy.role
 
-        val other = state.enemies.firstOrNull { it.id != enemy.id } ?: return enemy.role
+        val other = otherEnemies.first()
         val myDist = enemy.position.manhattanDistanceTo(state.player.position)
         val otherDist = other.position.manhattanDistanceTo(state.player.position)
 
-        return if (myDist < otherDist && myDist <= 3) {
+        return if (myDist < otherDist && myDist <= PINCER_CLOSE_DIST) {
             EnemyRole.PURSUER
-        } else if (otherDist < myDist && otherDist <= 3) {
+        } else if (otherDist < myDist && otherDist <= PINCER_CLOSE_DIST) {
             EnemyRole.INTERCEPTOR
         } else {
             enemy.role
         }
     }
 
+    // -------------------------------------------------------------------------
+    // Pursuer target selection
+    // -------------------------------------------------------------------------
+
     private fun selectPursuerTarget(
         state: GridHunterState,
         enemy: EnemyEntity,
         blocked: Set<GridPoint>,
+        otherEnemies: List<EnemyEntity>,
     ): GridPoint {
         val playerPos = state.player.position
-        if (state.config.difficulty == Difficulty.HARD || state.config.difficulty == Difficulty.INSANE) {
+        val difficulty = state.config.difficulty
+
+        // Coordination: if the Interceptor is already adjacent to the player,
+        // the Pursuer ignores flanking and closes in directly for the kill.
+        val interceptorAdjacent = otherEnemies.any { other ->
+            other.role == EnemyRole.INTERCEPTOR &&
+                other.position.isOrthogonallyAdjacentTo(playerPos)
+        }
+        if (interceptorAdjacent) return playerPos
+
+        // On HARD/INSANE try to flank an open orthogonal side of the player
+        if (difficulty == Difficulty.HARD || difficulty == Difficulty.INSANE) {
             val flankingSpot = state.bounds.validNeighbors(playerPos)
                 .filter { it !in blocked && it != enemy.position }
                 .minByOrNull { it.manhattanDistanceTo(enemy.position) }
 
-            if (flankingSpot != null && enemy.position.manhattanDistanceTo(playerPos) in 2..3) {
+            if (flankingSpot != null &&
+                enemy.position.manhattanDistanceTo(playerPos) in 2..3
+            ) {
                 return flankingSpot
             }
         }
+
         return playerPos
     }
+
+    // -------------------------------------------------------------------------
+    // Interceptor target selection (with pincer + jitter)
+    // -------------------------------------------------------------------------
+
+    /**
+     * Jitter window: the interceptor randomly samples one of up to [JITTER_WINDOW]
+     * candidates around the ideal chokepoint index on the escape path.
+     * The sample is seeded by (enemy.interceptorJitterSeed XOR elapsedPlayTimeMs / 500)
+     * so it changes roughly every half-second rather than every tick.
+     */
+    private const val JITTER_WINDOW = 3
 
     private fun selectInterceptorTarget(
         state: GridHunterState,
         enemy: EnemyEntity,
         blocked: Set<GridPoint>,
-        otherEnemyPositions: Set<GridPoint>,
+        otherEnemies: List<EnemyEntity>,
     ): GridPoint {
         val playerPos = state.player.position
         val distToPlayer = enemy.position.manhattanDistanceTo(playerPos)
 
-        if (distToPlayer <= 2) {
-            return playerPos
+        // Close-range kill switch: stop leading and strike directly
+        if (distToPlayer <= 2) return playerPos
+
+        // Pincer coordination (HARD / INSANE):
+        // If the Pursuer is close, move to the side of the player opposite the Pursuer
+        // so the two hunters form a pincer from different directions.
+        val difficulty = state.config.difficulty
+        if ((difficulty == Difficulty.HARD || difficulty == Difficulty.INSANE) &&
+            otherEnemies.isNotEmpty()
+        ) {
+            val pursuer = otherEnemies.firstOrNull { it.role == EnemyRole.PURSUER }
+            if (pursuer != null &&
+                pursuer.position.manhattanDistanceTo(playerPos) <= PINCER_CLOSE_DIST
+            ) {
+                val pincerTarget = selectPincerSide(state, enemy, pursuer, blocked)
+                if (pincerTarget != null) return pincerTarget
+            }
         }
 
+        // Escape path interception with jitter
         val escapePath = GridPathfinder.findShortestPath(
             bounds = state.bounds,
             start = playerPos,
@@ -314,26 +378,56 @@ object GridHunterAi {
         )
 
         if (escapePath.size >= 3) {
-            val leadIndex = (escapePath.size / 2).coerceIn(1, escapePath.size - 2)
-            val chokePoint = escapePath[leadIndex]
-            if (chokePoint !in blocked && chokePoint !in otherEnemyPositions) {
-                return chokePoint
+            val idealIndex = (escapePath.size / 2).coerceIn(1, escapePath.size - 2)
+
+            // Build candidate indices within the jitter window, clamped to valid range
+            val candidates = (-JITTER_WINDOW..JITTER_WINDOW)
+                .map { offset -> (idealIndex + offset).coerceIn(1, escapePath.size - 2) }
+                .distinct()
+                .map { escapePath[it] }
+                .filter { it !in blocked }
+
+            if (candidates.isNotEmpty()) {
+                // Stable per-enemy, per-half-second seed so it doesn't flicker every tick
+                val jitterSeed = enemy.interceptorJitterSeed xor
+                    (state.elapsedPlayTimeMs / 500L)
+                val chosen = candidates[
+                    (Random(jitterSeed).nextInt(candidates.size))
+                ]
+                return chosen
             }
         }
 
+        // Fallback: project 1-2 cells ahead along the player's last movement direction
         val dir = state.player.lastMoveDirection
         if (dir != null) {
             val twoAhead = playerPos.step(dir).step(dir)
-            if (state.bounds.contains(twoAhead) && twoAhead !in blocked) {
-                return twoAhead
-            }
+            if (state.bounds.contains(twoAhead) && twoAhead !in blocked) return twoAhead
             val oneAhead = playerPos.step(dir)
-            if (state.bounds.contains(oneAhead) && oneAhead !in blocked) {
-                return oneAhead
-            }
+            if (state.bounds.contains(oneAhead) && oneAhead !in blocked) return oneAhead
         }
 
         return playerPos
+    }
+
+    /**
+     * Pincer: finds the orthogonal neighbor of the player that is farthest from [pursuer]
+     * and reachable by [interceptor], so the two hunters approach from opposite sides.
+     */
+    private fun selectPincerSide(
+        state: GridHunterState,
+        interceptor: EnemyEntity,
+        pursuer: EnemyEntity,
+        blocked: Set<GridPoint>,
+    ): GridPoint? {
+        val playerPos = state.player.position
+        return state.bounds.validNeighbors(playerPos)
+            .filter { it !in blocked }
+            // Prefer the side farthest from the pursuer (maximize pincer spread)
+            .maxByOrNull { candidate ->
+                candidate.manhattanDistanceTo(pursuer.position) -
+                    candidate.manhattanDistanceTo(interceptor.position)
+            }
     }
 }
 
@@ -356,18 +450,12 @@ object GridHunterLevelGenerator {
 
         repeat(MAX_GENERATION_ATTEMPTS) {
             val candidate = tryGenerateCandidate(config, allPoints, random, seed)
-            if (candidate != null) {
-                return candidate
-            }
+            if (candidate != null) return candidate
         }
 
         return createDeterministicFallback(config, seed)
     }
 
-    /**
-     * Generates a new round layout keeping the existing state's elapsedPlayTimeMs,
-     * moveCount, exitsReached, and seed. Used for continuous play after exit reached.
-     */
     fun generateNextRound(
         existingState: GridHunterState,
         roundSeed: Long = System.nanoTime(),
@@ -407,7 +495,6 @@ object GridHunterLevelGenerator {
         val shuffled = allPoints.shuffled(random)
 
         val playerPos = shuffled.first()
-
         val exitPos = shuffled.firstOrNull { candidate ->
             candidate != playerPos &&
                 candidate.manhattanDistanceTo(playerPos) >= MIN_PLAYER_EXIT_DISTANCE
@@ -427,25 +514,16 @@ object GridHunterLevelGenerator {
         }
 
         val reserved = buildSet {
-            add(playerPos)
-            add(exitPos)
-            addAll(chosenEnemyPositions)
+            add(playerPos); add(exitPos); addAll(chosenEnemyPositions)
         }
 
         val targetObstacleCount = if (config.obstacleCountRange.last > 0) {
             config.obstacleCountRange.random(random)
-        } else {
-            0
-        }
+        } else { 0 }
 
         val obstacles = if (targetObstacleCount > 0) {
-            shuffled.asSequence()
-                .filter { it !in reserved }
-                .take(targetObstacleCount)
-                .toSet()
-        } else {
-            emptySet()
-        }
+            shuffled.asSequence().filter { it !in reserved }.take(targetObstacleCount).toSet()
+        } else { emptySet() }
 
         if (!isBoardValidAndFair(bounds, playerPos, exitPos, chosenEnemyPositions, obstacles)) {
             return null
@@ -463,6 +541,7 @@ object GridHunterLevelGenerator {
                 position = pos,
                 previousPosition = pos,
                 scheduler = IntervalScheduler(intervalMs = interval),
+                interceptorJitterSeed = (seed xor ((index + 1).toLong() * 0x9e3779b97f4a7c15L)),
             )
         }
 
@@ -506,20 +585,14 @@ object GridHunterLevelGenerator {
         Difficulty.HARD, Difficulty.INSANE -> listOf(EnemyRole.PURSUER, EnemyRole.INTERCEPTOR)
     }
 
-    private fun createDeterministicFallback(
-        config: GridHunterConfig,
-        seed: Long,
-    ): GridHunterState {
+    private fun createDeterministicFallback(config: GridHunterConfig, seed: Long): GridHunterState {
         val w = config.bounds.width
         val h = config.bounds.height
         val playerPos = GridPoint(0, 0)
         val exitPos = GridPoint(w - 1, h - 1)
 
         val roles = buildEnemyRoles(config.difficulty)
-        val fallbackPositions = listOf(
-            GridPoint(w - 1, 0),
-            GridPoint(0, h - 1),
-        )
+        val fallbackPositions = listOf(GridPoint(w - 1, 0), GridPoint(0, h - 1))
 
         val enemies = roles.mapIndexed { index, role ->
             val pos = fallbackPositions[index % fallbackPositions.size]
@@ -533,6 +606,7 @@ object GridHunterLevelGenerator {
                 position = pos,
                 previousPosition = pos,
                 scheduler = IntervalScheduler(intervalMs = interval),
+                interceptorJitterSeed = (seed xor ((index + 1).toLong() * 0x9e3779b97f4a7c15L)),
             )
         }
 
@@ -554,41 +628,22 @@ object GridHunterLevelGenerator {
 
 class GridHunterEngine : GameEngine<GridHunterState, GridHunterCommand, GridHunterConfig> {
 
-    override fun createInitialState(
-        config: GridHunterConfig,
-        seed: Long,
-    ): GridHunterState = GridHunterLevelGenerator.generate(config = config, seed = seed)
+    override fun createInitialState(config: GridHunterConfig, seed: Long): GridHunterState =
+        GridHunterLevelGenerator.generate(config = config, seed = seed)
 
     override fun start(state: GridHunterState): GridHunterState =
-        if (state.phase == GamePhase.READY) {
-            state.copy(phase = GamePhase.PLAYING)
-        } else {
-            state
-        }
+        if (state.phase == GamePhase.READY) state.copy(phase = GamePhase.PLAYING) else state
 
     override fun pause(state: GridHunterState): GridHunterState =
-        if (state.phase == GamePhase.PLAYING) {
-            state.copy(phase = GamePhase.PAUSED)
-        } else {
-            state
-        }
+        if (state.phase == GamePhase.PLAYING) state.copy(phase = GamePhase.PAUSED) else state
 
     override fun resume(state: GridHunterState): GridHunterState =
-        if (state.phase == GamePhase.PAUSED) {
-            state.copy(phase = GamePhase.PLAYING)
-        } else {
-            state
-        }
+        if (state.phase == GamePhase.PAUSED) state.copy(phase = GamePhase.PLAYING) else state
 
-    override fun onCommand(
-        state: GridHunterState,
-        command: GridHunterCommand,
-    ): GridHunterState {
+    override fun onCommand(state: GridHunterState, command: GridHunterCommand): GridHunterState {
         if (state.phase != GamePhase.PLAYING) return state
-
         return when (command) {
             GridHunterCommand.ClearBufferedMove -> state.copy(bufferedDirection = null)
-
             is GridHunterCommand.Move -> {
                 if (state.playerCooldownRemainingMs > 0L) {
                     state.copy(bufferedDirection = command.direction)
@@ -603,15 +658,10 @@ class GridHunterEngine : GameEngine<GridHunterState, GridHunterCommand, GridHunt
         }
     }
 
-    override fun onTick(
-        state: GridHunterState,
-        deltaMillis: Long,
-    ): GridHunterState {
+    override fun onTick(state: GridHunterState, deltaMillis: Long): GridHunterState {
         if (state.phase != GamePhase.PLAYING || deltaMillis <= 0L) return state
 
-        var current = state.copy(
-            elapsedPlayTimeMs = state.elapsedPlayTimeMs + deltaMillis,
-        )
+        var current = state.copy(elapsedPlayTimeMs = state.elapsedPlayTimeMs + deltaMillis)
         var playerMovedThisTick = false
 
         if (current.playerCooldownRemainingMs > 0L) {
@@ -626,9 +676,7 @@ class GridHunterEngine : GameEngine<GridHunterState, GridHunterCommand, GridHunt
                     playerMovedThisTick = false,
                 )
                 playerMovedThisTick = true
-                if (current.phase != GamePhase.PLAYING) {
-                    return current
-                }
+                if (current.phase != GamePhase.PLAYING) return current
             }
         }
 
@@ -657,7 +705,6 @@ class GridHunterEngine : GameEngine<GridHunterState, GridHunterCommand, GridHunt
             }
         }
 
-        // Exit reached: generate next round seamlessly, no VICTORY screen
         if (isPlayerOnUnoccupiedExit(current)) {
             return GridHunterLevelGenerator.generateNextRound(current)
         }
@@ -672,7 +719,6 @@ class GridHunterEngine : GameEngine<GridHunterState, GridHunterCommand, GridHunt
     ): GridHunterState {
         val candidatePos = state.player.position.step(direction)
         val isBlocked = !state.bounds.contains(candidatePos) || candidatePos in state.obstacles
-
         val nextPos = if (isBlocked) state.player.position else candidatePos
         val moved = nextPos != state.player.position
 
@@ -695,11 +741,8 @@ class GridHunterEngine : GameEngine<GridHunterState, GridHunterCommand, GridHunt
                 simultaneousUpdate = playerMovedThisTick,
             )
         }
-        if (collided) {
-            return updatedState.copy(phase = GamePhase.GAME_OVER)
-        }
+        if (collided) return updatedState.copy(phase = GamePhase.GAME_OVER)
 
-        // Exit reached via player command: generate next round seamlessly
         if (isPlayerOnUnoccupiedExit(updatedState)) {
             return GridHunterLevelGenerator.generateNextRound(updatedState)
         }
@@ -713,14 +756,10 @@ class GridHunterEngine : GameEngine<GridHunterState, GridHunterCommand, GridHunt
         simultaneousUpdate: Boolean,
     ): Boolean {
         if (player.position == enemy.position) return true
-
         if (simultaneousUpdate &&
             player.previousPosition == enemy.position &&
             player.position == enemy.previousPosition
-        ) {
-            return true
-        }
-
+        ) return true
         return false
     }
 
