@@ -21,7 +21,7 @@ object GridHunterMeta {
 
     val DESCRIPTOR = GameDescriptor(
         id = ID,
-        title = "Grid Hunter",
+        title = "Gridscape",
         subtitle = "Outsmart neon hunters on an 8×8 grid",
         supportedDifficulties = Difficulty.entries,
     )
