@@ -276,20 +276,6 @@ fun GridHunterBoardCanvas(
         exploredCells = exploredCells + state.player.position
     }
 
-    var exitFlashVisible by remember { mutableStateOf(false) }
-    LaunchedEffect(state.phase, state.seed) {
-        if (state.phase == GamePhase.PLAYING) {
-            while (isActive) {
-                delay(Random.nextLong(850L, 2100L))
-                exitFlashVisible = true
-                delay(Random.nextLong(80L, 180L))
-                exitFlashVisible = false
-            }
-        } else {
-            exitFlashVisible = false
-        }
-    }
-
     var gridDistorted by remember { mutableStateOf(false) }
     LaunchedEffect(state.phase, state.seed) {
         if (state.phase == GamePhase.PLAYING) {
@@ -322,6 +308,7 @@ fun GridHunterBoardCanvas(
     }
 
     val playerPulse by rememberNeonPulse(minScale = 0.90f, maxScale = 1.06f, durationMs = 950)
+    val exitPulse by rememberNeonPulse(minScale = 0.88f, maxScale = 1.12f, durationMs = 1900)
 
     Canvas(
         modifier = modifier.cardinalSwipeInput(
@@ -340,7 +327,6 @@ fun GridHunterBoardCanvas(
         drawRect(color = Color.Black, size = size)
         drawExploredGrid(
             viewport = viewport,
-            exploredCells = exploredCells,
             lineColor = Color(0xFF252A35),
             distorted = gridDistorted,
         )
@@ -353,14 +339,14 @@ fun GridHunterBoardCanvas(
             }
         }
 
-        if (exitFlashVisible && exitVisibility > 0f) {
+        if (exitVisibility > 0f) {
             drawNeonEntitySquare(
                 viewport = viewport,
                 gridX = state.exitPosition.x.toFloat(),
                 gridY = state.exitPosition.y.toFloat(),
-                coreColor = colors.exitGreen.copy(alpha = 0.62f * exitVisibility),
-                glowColor = colors.exitGreenGlow.copy(alpha = 0.28f * exitVisibility),
-                pulseScale = 1f,
+                coreColor = colors.exitGreen.copy(alpha = 0.48f * exitVisibility),
+                glowColor = colors.exitGreenGlow.copy(alpha = 0.20f * exitVisibility),
+                pulseScale = exitPulse,
                 insetRatio = 0.24f,
             )
         }
@@ -547,17 +533,16 @@ private fun formatDurationSeconds(durationMs: Long): String {
 
 
 /**
- * Draws only the edges surrounding cells the player has already visited.
- * Unexplored space remains pure black, with no board fill or outer frame.
+ * Draws a consistently visible, subdued grid over the full board.
+ * Rare distortion briefly offsets the otherwise steady grid lines.
  */
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawExploredGrid(
     viewport: com.minigames.core.rendering.GridViewport,
-    exploredCells: Set<GridPoint>,
     lineColor: Color,
     distorted: Boolean,
 ) {
     val cell = viewport.cellSizePx
-    if (cell <= 0f || exploredCells.isEmpty()) return
+    if (cell <= 0f) return
 
     fun drawSegment(start: Offset, end: Offset, seed: Int, horizontal: Boolean) {
         val displacement = if (distorted) {
@@ -577,26 +562,18 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawExploredGrid(
     // Horizontal boundaries: draw a segment if either adjacent cell is explored.
     for (y in 0..viewport.bounds.height) {
         for (x in 0 until viewport.bounds.width) {
-            val aboveExplored = y > 0 && GridPoint(x, y - 1) in exploredCells
-            val belowExplored = y < viewport.bounds.height && GridPoint(x, y) in exploredCells
-            if (aboveExplored || belowExplored) {
-                val px = viewport.originOffset.x + x * cell
-                val py = viewport.originOffset.y + y * cell
-                drawSegment(Offset(px, py), Offset(px + cell, py), x * 31 + y * 17, true)
-            }
+            val px = viewport.originOffset.x + x * cell
+            val py = viewport.originOffset.y + y * cell
+            drawSegment(Offset(px, py), Offset(px + cell, py), x * 31 + y * 17, true)
         }
     }
 
     // Vertical boundaries.
     for (x in 0..viewport.bounds.width) {
         for (y in 0 until viewport.bounds.height) {
-            val leftExplored = x > 0 && GridPoint(x - 1, y) in exploredCells
-            val rightExplored = x < viewport.bounds.width && GridPoint(x, y) in exploredCells
-            if (leftExplored || rightExplored) {
-                val px = viewport.originOffset.x + x * cell
-                val py = viewport.originOffset.y + y * cell
-                drawSegment(Offset(px, py), Offset(px, py + cell), x * 19 + y * 37 + 11, false)
-            }
+            val px = viewport.originOffset.x + x * cell
+            val py = viewport.originOffset.y + y * cell
+            drawSegment(Offset(px, py), Offset(px, py + cell), x * 19 + y * 37 + 11, false)
         }
     }
 }
