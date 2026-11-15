@@ -346,7 +346,9 @@ fun GridHunterBoardCanvas(
         )
 
         for (obstacle in state.obstacles) {
-            if (obstacle in exploredCells) {
+            val discovered = obstacle in exploredCells ||
+                state.bounds.validNeighbors(obstacle).any { it in exploredCells }
+            if (discovered) {
                 drawNeonObstacleCell(viewport = viewport, point = obstacle, colors = colors)
             }
         }
