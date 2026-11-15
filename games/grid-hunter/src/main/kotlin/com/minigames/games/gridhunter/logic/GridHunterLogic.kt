@@ -627,6 +627,7 @@ class GridHunterEngine : GameEngine<GridHunterState, GridHunterCommand, GridHunt
 
             if (advanceResult.stepsToExecute <= 0) {
                 enemies = enemies.replaceAt(index, enemy.copy(scheduler = advanceResult.scheduler))
+                current = current.copy(enemies = enemies)
                 continue
             }
 
