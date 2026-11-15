@@ -31,7 +31,6 @@ class GridHunterEngineTest {
             assertEquals(8, state.bounds.width)
             assertEquals(8, state.bounds.height)
 
-            // Player, exit, and enemies must be distinct and within bounds
             assertTrue(state.bounds.contains(state.player.position))
             assertTrue(state.bounds.contains(state.exitPosition))
             assertNotEquals(state.player.position, state.exitPosition)
@@ -44,7 +43,6 @@ class GridHunterEngineTest {
                 assertTrue(state.player.position.manhattanDistanceTo(enemy.position) >= 5)
             }
 
-            // Obstacles must match difficulty rules and never overlap entities
             if (difficulty == Difficulty.INSANE) {
                 assertTrue(state.obstacles.size in 5..10)
             } else {
@@ -54,7 +52,6 @@ class GridHunterEngineTest {
             assertFalse(state.exitPosition in state.obstacles)
             assertTrue(state.enemies.none { it.position in state.obstacles })
 
-            // Player must have at least 2 open adjacent cells and a valid path to exit
             val openNeighbors = state.bounds.validNeighbors(state.player.position)
                 .count { it !in state.obstacles }
             assertTrue(openNeighbors >= 2)
@@ -80,17 +77,14 @@ class GridHunterEngineTest {
             obstacles = setOf(GridPoint(1, 0)),
         )
 
-        // Moving LEFT out of bounds keeps player at (0, 0) without incrementing moveCount
         val afterOutOfBounds = engine.onCommand(baseState, GridHunterCommand.Move(Direction.LEFT))
         assertEquals(GridPoint(0, 0), afterOutOfBounds.player.position)
         assertEquals(0, afterOutOfBounds.moveCount)
 
-        // Moving RIGHT into obstacle at (1, 0) is blocked
         val afterObstacle = engine.onCommand(baseState, GridHunterCommand.Move(Direction.RIGHT))
         assertEquals(GridPoint(0, 0), afterObstacle.player.position)
         assertEquals(0, afterObstacle.moveCount)
 
-        // Moving DOWN to open cell (0, 1) succeeds
         val afterValidMove = engine.onCommand(baseState, GridHunterCommand.Move(Direction.DOWN))
         assertEquals(GridPoint(0, 1), afterValidMove.player.position)
         assertEquals(1, afterValidMove.moveCount)
@@ -104,14 +98,25 @@ class GridHunterEngineTest {
             player = PlayerEntity(position = GridPoint(6, 7)),
             enemies = emptyList(),
             exitPosition = GridPoint(7, 7),
+            moveCount = 5,
+            exitsReached = 0,
         )
 
         val result = engine.onCommand(state, GridHunterCommand.Move(Direction.RIGHT))
-        // Exit reached: continuous play — no VICTORY, new round spawned in PLAYING
+
+        // Continuous play: phase stays PLAYING, exitsReached incremented
         assertEquals(GamePhase.PLAYING, result.phase)
         assertEquals(1, result.exitsReached)
-        // New round: player position is reset (not on old exit)
-        assertNotEquals(GridPoint(7, 7), result.player.position)
+        // Move count carried over (the move itself added 1, so >= 6)
+        assertTrue(result.moveCount >= 6)
+        // New level generated: bounds still correct
+        assertEquals(8, result.bounds.width)
+        assertEquals(8, result.bounds.height)
+        // Player is on a valid cell
+        assertTrue(result.bounds.contains(result.player.position))
+        // Exit is on a valid cell and not on the player
+        assertTrue(result.bounds.contains(result.exitPosition))
+        assertNotEquals(result.player.position, result.exitPosition)
     }
 
     @Test
@@ -156,7 +161,6 @@ class GridHunterEngineTest {
         assertEquals(GridPoint(0, 0), path.first())
         assertEquals(GridPoint(2, 0), path.last())
         assertTrue(path.none { it in obstacles })
-        // Must go down to row 3 around the wall
         assertEquals(9, path.size)
     }
 }

@@ -164,7 +164,7 @@ fun GridscapeApp(
                             difficulty = current.difficulty,
                             controlMode = settings.controlMode,
                             hapticsEnabled = settings.hapticsEnabled,
-                            onGameOver = { elapsedMs, moves, exitsReached ->
+                            onGameOver = { elapsedMs, _, _ ->
                                 scope.launch {
                                     storage.statsRepository.recordGameResult(
                                         gameId = GridHunterMeta.ID,
@@ -237,7 +237,6 @@ private fun HubScreen(
         ) {
             items(games, key = { it.id.value }) { game ->
                 val allStats = statsByGame[game.id].orEmpty().values
-                val totalWins = allStats.sumOf { it.wins }
                 val totalPlayed = allStats.sumOf { it.gamesPlayed }
 
                 Surface(
@@ -295,7 +294,7 @@ private fun HubScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                text = "PLAYED: $totalPlayed  \u2022  EXITS: ${allStats.sumOf { 0 }}",
+                                text = "PLAYED: $totalPlayed",
                                 color = colors.exitGreen,
                                 fontSize = 12.sp,
                                 fontFamily = FontFamily.Monospace,
