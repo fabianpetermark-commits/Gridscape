@@ -62,7 +62,6 @@ import com.minigames.core.input.cardinalSwipeInput
 import com.minigames.core.models.Difficulty
 import com.minigames.core.models.Direction
 import com.minigames.core.models.GamePhase
-import com.minigames.core.models.isTerminal
 import com.minigames.core.rendering.LocalMiniGamesColors
 import com.minigames.core.rendering.calculateGridViewport
 import com.minigames.core.rendering.drawNeonEntitySquare
@@ -76,8 +75,8 @@ import com.minigames.games.gridhunter.logic.GridHunterConfig
 import com.minigames.games.gridhunter.logic.GridHunterEngine
 import com.minigames.games.gridhunter.logic.GridHunterState
 import java.util.Locale
-import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.distinctUntilChangedBy
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 
 @Composable
 fun GridHunterScreen(
@@ -102,6 +101,7 @@ fun GridHunterScreen(
     val state by session.state.collectAsStateWithLifecycle()
     var gameOverReported by remember { mutableStateOf(false) }
 
+    // Lifecycle pause/resume
     DisposableEffect(lifecycleOwner, session) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
@@ -114,17 +114,18 @@ fun GridHunterScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // Dedicated game loop coroutine – runs for the entire lifetime of the session,
+    // never cancelled and restarted mid-game. It calls stepClock every 16ms and
+    // simply skips ticks when the game is not in PLAYING state. This avoids all
+    // race conditions with flow operators that could interrupt the loop.
     LaunchedEffect(session) {
-        session.state
-            .distinctUntilChangedBy { it.phase }
-            .collectLatest { s ->
-                if (s.phase == GamePhase.PLAYING) {
-                    session.runLoop(stepCadenceMillis = 16L)
-                }
-            }
+        while (isActive) {
+            session.stepClock()
+            delay(16L)
+        }
     }
 
-    // GAME_OVER: report once, then show overlay
+    // Report GAME_OVER once per session
     LaunchedEffect(state.phase) {
         if (state.phase == GamePhase.GAME_OVER && !gameOverReported) {
             gameOverReported = true
@@ -174,7 +175,6 @@ fun GridHunterScreen(
                     .aspectRatio(1f),
             )
 
-            // Overlay only for READY, PAUSED, GAME_OVER — not VICTORY (continuous play)
             if (state.phase == GamePhase.READY ||
                 state.phase == GamePhase.PAUSED ||
                 state.phase == GamePhase.GAME_OVER
