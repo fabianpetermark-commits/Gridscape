@@ -344,8 +344,8 @@ fun GridHunterBoardCanvas(
                 viewport = viewport,
                 gridX = state.exitPosition.x.toFloat(),
                 gridY = state.exitPosition.y.toFloat(),
-                coreColor = colors.exitGreen.copy(alpha = 0.48f * exitVisibility),
-                glowColor = colors.exitGreenGlow.copy(alpha = 0.20f * exitVisibility),
+                coreColor = Color(0xFF00F5FF).copy(alpha = exitVisibility),
+                glowColor = Color(0x4D00F5FF).copy(alpha = exitVisibility),
                 pulseScale = exitPulse,
                 insetRatio = 0.24f,
             )
@@ -368,8 +368,8 @@ fun GridHunterBoardCanvas(
             viewport = viewport,
             gridX = animatedPlayer.x,
             gridY = animatedPlayer.y,
-            coreColor = colors.playerCyan,
-            glowColor = colors.playerCyanGlow,
+            coreColor = Color(0xFF3688FF),
+            glowColor = Color(0x4D3688FF),
             pulseScale = playerPulse,
             insetRatio = 0.17f,
         )
