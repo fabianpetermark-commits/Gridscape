@@ -43,6 +43,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -62,6 +63,7 @@ import com.minigames.core.input.cardinalSwipeInput
 import com.minigames.core.models.Difficulty
 import com.minigames.core.models.Direction
 import com.minigames.core.models.GamePhase
+import com.minigames.core.models.GridPoint
 import com.minigames.core.rendering.LocalMiniGamesColors
 import com.minigames.core.rendering.calculateGridViewport
 import com.minigames.core.rendering.drawNeonEntitySquare
@@ -77,6 +79,8 @@ import com.minigames.games.gridhunter.logic.GridHunterState
 import java.util.Locale
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
+import kotlin.random.Random
+import kotlin.math.sin
 
 @Composable
 fun GridHunterScreen(
@@ -143,7 +147,7 @@ fun GridHunterScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
-            .background(colors.background)
+            .background(Color.Black)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.SpaceBetween,
@@ -265,6 +269,51 @@ fun GridHunterBoardCanvas(
 ) {
     val colors = LocalMiniGamesColors.current
 
+    var exploredCells by remember(state.seed) {
+        mutableStateOf(setOf(state.player.position))
+    }
+    LaunchedEffect(state.seed, state.player.position) {
+        exploredCells = exploredCells + state.player.position
+    }
+
+    var exitFlashVisible by remember { mutableStateOf(false) }
+    LaunchedEffect(state.phase, state.seed) {
+        if (state.phase == GamePhase.PLAYING) {
+            while (isActive) {
+                delay(Random.nextLong(850L, 2100L))
+                exitFlashVisible = true
+                delay(Random.nextLong(80L, 180L))
+                exitFlashVisible = false
+            }
+        } else {
+            exitFlashVisible = false
+        }
+    }
+
+    var gridDistorted by remember { mutableStateOf(false) }
+    LaunchedEffect(state.phase, state.seed) {
+        if (state.phase == GamePhase.PLAYING) {
+            while (isActive) {
+                delay(Random.nextLong(2400L, 5200L))
+                gridDistorted = true
+                delay(Random.nextLong(90L, 190L))
+                gridDistorted = false
+            }
+        } else {
+            gridDistorted = false
+        }
+    }
+
+    val nearestEnemyDistance = state.enemies.minOfOrNull {
+        it.position.manhattanDistanceTo(state.player.position)
+    } ?: Int.MAX_VALUE
+    val exitVisibility = when {
+        nearestEnemyDistance <= 2 -> 0f
+        nearestEnemyDistance <= 4 -> 0.22f
+        nearestEnemyDistance <= 6 -> 0.55f
+        else -> 1f
+    }
+
     val animatedPlayer = rememberAnimatedGridPoint(target = state.player.position, durationMs = 65)
     val animatedEnemies = state.enemies.map { enemy ->
         key(enemy.id) {
@@ -273,7 +322,6 @@ fun GridHunterBoardCanvas(
     }
 
     val playerPulse by rememberNeonPulse(minScale = 0.90f, maxScale = 1.06f, durationMs = 950)
-    val exitPulse by rememberNeonPulse(minScale = 0.94f, maxScale = 1.03f, durationMs = 1300)
 
     Canvas(
         modifier = modifier.cardinalSwipeInput(
@@ -289,21 +337,31 @@ fun GridHunterBoardCanvas(
             paddingPx = 6f,
         )
 
-        drawNeonGridBoard(viewport = viewport, colors = colors)
+        drawRect(color = Color.Black, size = size)
+        drawExploredGrid(
+            viewport = viewport,
+            exploredCells = exploredCells,
+            lineColor = Color(0xFF252A35),
+            distorted = gridDistorted,
+        )
 
         for (obstacle in state.obstacles) {
-            drawNeonObstacleCell(viewport = viewport, point = obstacle, colors = colors)
+            if (obstacle in exploredCells) {
+                drawNeonObstacleCell(viewport = viewport, point = obstacle, colors = colors)
+            }
         }
 
-        drawNeonEntitySquare(
-            viewport = viewport,
-            gridX = state.exitPosition.x.toFloat(),
-            gridY = state.exitPosition.y.toFloat(),
-            coreColor = colors.exitGreen,
-            glowColor = colors.exitGreenGlow,
-            pulseScale = exitPulse,
-            insetRatio = 0.16f,
-        )
+        if (exitFlashVisible && exitVisibility > 0f) {
+            drawNeonEntitySquare(
+                viewport = viewport,
+                gridX = state.exitPosition.x.toFloat(),
+                gridY = state.exitPosition.y.toFloat(),
+                coreColor = colors.exitGreen.copy(alpha = 0.62f * exitVisibility),
+                glowColor = colors.exitGreenGlow.copy(alpha = 0.28f * exitVisibility),
+                pulseScale = 1f,
+                insetRatio = 0.24f,
+            )
+        }
 
         for ((enemy, coords) in animatedEnemies) {
             drawNeonEntitySquare(
@@ -483,4 +541,60 @@ private fun DpadArrowButton(
 private fun formatDurationSeconds(durationMs: Long): String {
     val seconds = durationMs / 1000.0
     return String.format(Locale.US, "%.2fs", seconds)
+}
+
+
+/**
+ * Draws only the edges surrounding cells the player has already visited.
+ * Unexplored space remains pure black, with no board fill or outer frame.
+ */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawExploredGrid(
+    viewport: com.minigames.core.rendering.GridViewport,
+    exploredCells: Set<GridPoint>,
+    lineColor: Color,
+    distorted: Boolean,
+) {
+    val cell = viewport.cellSizePx
+    if (cell <= 0f || exploredCells.isEmpty()) return
+
+    fun drawSegment(start: Offset, end: Offset, seed: Int, horizontal: Boolean) {
+        val displacement = if (distorted) {
+            (sin(seed * 1.73) * cell * 0.035).toFloat()
+        } else {
+            0f
+        }
+        val offset = if (horizontal) Offset(0f, displacement) else Offset(displacement, 0f)
+        drawLine(
+            color = lineColor,
+            start = start + offset,
+            end = end + offset,
+            strokeWidth = if (distorted) 2.2f else 1.6f,
+        )
+    }
+
+    // Horizontal boundaries: draw a segment if either adjacent cell is explored.
+    for (y in 0..viewport.bounds.height) {
+        for (x in 0 until viewport.bounds.width) {
+            val aboveExplored = y > 0 && GridPoint(x, y - 1) in exploredCells
+            val belowExplored = y < viewport.bounds.height && GridPoint(x, y) in exploredCells
+            if (aboveExplored || belowExplored) {
+                val px = viewport.originOffset.x + x * cell
+                val py = viewport.originOffset.y + y * cell
+                drawSegment(Offset(px, py), Offset(px + cell, py), x * 31 + y * 17, true)
+            }
+        }
+    }
+
+    // Vertical boundaries.
+    for (x in 0..viewport.bounds.width) {
+        for (y in 0 until viewport.bounds.height) {
+            val leftExplored = x > 0 && GridPoint(x - 1, y) in exploredCells
+            val rightExplored = x < viewport.bounds.width && GridPoint(x, y) in exploredCells
+            if (leftExplored || rightExplored) {
+                val px = viewport.originOffset.x + x * cell
+                val py = viewport.originOffset.y + y * cell
+                drawSegment(Offset(px, py), Offset(px, py + cell), x * 19 + y * 37 + 11, false)
+            }
+        }
+    }
 }
