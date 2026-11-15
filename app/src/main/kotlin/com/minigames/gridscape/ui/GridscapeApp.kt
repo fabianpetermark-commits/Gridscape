@@ -160,19 +160,17 @@ fun GridscapeApp(
             is AppRoute.Playing -> {
                 when (current.gameId) {
                     GridHunterMeta.ID -> {
-                        val bestMs = gridHunterStats[current.difficulty]?.bestCompletionTimeMs
                         GridHunterScreen(
                             difficulty = current.difficulty,
                             controlMode = settings.controlMode,
                             hapticsEnabled = settings.hapticsEnabled,
-                            bestCompletionTimeMs = bestMs,
-                            onGameFinished = { won, completionTimeMs ->
+                            onGameOver = { elapsedMs, moves, exitsReached ->
                                 scope.launch {
                                     storage.statsRepository.recordGameResult(
                                         gameId = GridHunterMeta.ID,
                                         difficulty = current.difficulty,
-                                        won = won,
-                                        completionTimeMs = completionTimeMs,
+                                        won = false,
+                                        completionTimeMs = elapsedMs,
                                     )
                                 }
                             },
@@ -297,7 +295,7 @@ private fun HubScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Text(
-                                text = "WINS: $totalWins / $totalPlayed",
+                                text = "PLAYED: $totalPlayed  \u2022  EXITS: ${allStats.sumOf { 0 }}",
                                 color = colors.exitGreen,
                                 fontSize = 12.sp,
                                 fontFamily = FontFamily.Monospace,
@@ -348,7 +346,7 @@ private fun DifficultySelectScreen(
             title = { Text("Reset Statistics?", color = colors.textPrimary) },
             text = {
                 Text(
-                    "Clear all win/loss records and best times for ${game.title}?",
+                    "Clear all records for ${game.title}?",
                     color = colors.textSecondary,
                 )
             },
@@ -414,8 +412,8 @@ private fun DifficultySelectScreen(
                 modifier = Modifier.fillMaxWidth(),
             ) {
                 val hintText = when (controlMode) {
-                    ControlMode.HYBRID -> "Controls: Swipe on board or use D-Pad. First move starts clock."
-                    ControlMode.SWIPE -> "Controls: Swipe anywhere on the 6×6 grid to move."
+                    ControlMode.HYBRID -> "Controls: Swipe on board or use D-Pad. First move starts the clock."
+                    ControlMode.SWIPE -> "Controls: Swipe anywhere on the 8\u00d78 grid to move."
                     ControlMode.DPAD -> "Controls: Tap the directional D-Pad below the grid."
                 }
                 Text(
@@ -467,11 +465,8 @@ private fun DifficultySelectScreen(
                                 fontSize = 12.sp,
                             )
                             Spacer(modifier = Modifier.height(8.dp))
-                            val bestLabel = stats.bestCompletionTimeMs?.let {
-                                String.format(Locale.US, "%.2fs", it / 1000.0)
-                            } ?: "--"
                             Text(
-                                text = "W: ${stats.wins}  L: ${stats.losses}  BEST: $bestLabel",
+                                text = "PLAYED: ${stats.gamesPlayed}  \u2022  BEST: ${stats.bestCompletionTimeMs?.let { String.format(Locale.US, "%.2fs", it / 1000.0) } ?: "--"}",
                                 color = colors.textPrimary,
                                 fontSize = 12.sp,
                                 fontFamily = FontFamily.Monospace,
@@ -585,7 +580,7 @@ private fun SettingsScreen(
             ) {
                 SettingsToggleRow(
                     title = "Haptic Feedback",
-                    subtitle = "Vibrate on directional steps and round completion",
+                    subtitle = "Vibrate on directional steps and game over",
                     checked = settings.hapticsEnabled,
                     onCheckedChange = onHapticsChanged,
                 )
@@ -643,8 +638,8 @@ private fun difficultyAccentColor(difficulty: Difficulty): Color {
 }
 
 private fun gridHunterDifficultySummary(difficulty: Difficulty): String = when (difficulty) {
-    Difficulty.EASY -> "1 Pursuer (750ms) · Open 6×6 grid"
-    Difficulty.MEDIUM -> "1 Fast Interceptor (350ms) · Cuts off escape path"
-    Difficulty.HARD -> "2 Hunters (500ms) · Coordinated pursuit & flank"
-    Difficulty.INSANE -> "2 Dynamic Hunters (450–500ms) · 5–8 Obstacles"
+    Difficulty.EASY -> "1 Pursuer (750ms) \u00b7 Open 8\u00d78 grid"
+    Difficulty.MEDIUM -> "1 Fast Interceptor (350ms) \u00b7 Cuts off escape path"
+    Difficulty.HARD -> "2 Hunters (500ms) \u00b7 Coordinated pursuit & flank"
+    Difficulty.INSANE -> "2 Dynamic Hunters (450\u2013500ms) \u00b7 5\u201310 Obstacles"
 }
