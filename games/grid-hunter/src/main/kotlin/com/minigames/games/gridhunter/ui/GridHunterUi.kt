@@ -44,9 +44,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -342,6 +344,17 @@ fun GridHunterBoardCanvas(
     val playerPulse by rememberNeonPulse(minScale = 0.90f, maxScale = 1.06f, durationMs = 950)
     val exitPulse by rememberNeonPulse(minScale = 0.88f, maxScale = 1.12f, durationMs = 1900)
     val atmospherePulse by rememberNeonPulse(minScale = 0.92f, maxScale = 1.04f, durationMs = 9000)
+    var vortexRotation by remember(state.seed) { mutableStateOf(0f) }
+    LaunchedEffect(state.phase, state.seed) {
+        if (state.phase == GamePhase.PLAYING) {
+            while (isActive) {
+                vortexRotation = (vortexRotation + 5f) % 360f
+                delay(32L)
+            }
+        } else {
+            vortexRotation = 0f
+        }
+    }
 
     Canvas(
         modifier = modifier.cardinalSwipeInput(
@@ -405,29 +418,65 @@ fun GridHunterBoardCanvas(
 
         if (exitVisibility > 0f) {
             val exitCenter = viewport.cellCenter(state.exitPosition)
-            val exitGlowRadius = viewport.cellSizePx * (0.78f + 0.12f * exitPulse)
-            // Soft radial bloom sits behind the crisp portal core.
+            val cell = viewport.cellSizePx
+            val vortexScale = exitPulse
+            val outerRadius = cell * (0.47f + 0.08f * vortexScale)
+            val middleRadius = cell * 0.31f
+            val innerRadius = cell * 0.17f
+
+            // A dark center with layered cyan rings reads as a top-down spatial vortex.
             drawCircle(
                 brush = Brush.radialGradient(
                     colors = listOf(
+                        Color(0xFF00151C).copy(alpha = exitVisibility),
+                        Color(0xCC002B35).copy(alpha = exitVisibility),
                         Color(0x6600F5FF).copy(alpha = exitVisibility),
-                        Color(0x2200F5FF).copy(alpha = exitVisibility),
                         Color.Transparent,
                     ),
                     center = exitCenter,
-                    radius = exitGlowRadius,
+                    radius = outerRadius * 1.9f,
                 ),
-                radius = exitGlowRadius,
+                radius = outerRadius * 1.9f,
                 center = exitCenter,
             )
-            drawNeonEntitySquare(
-                viewport = viewport,
-                gridX = state.exitPosition.x.toFloat(),
-                gridY = state.exitPosition.y.toFloat(),
-                coreColor = Color(0xFF00F5FF).copy(alpha = exitVisibility),
-                glowColor = Color(0x4D00F5FF).copy(alpha = exitVisibility),
-                pulseScale = exitPulse,
-                insetRatio = 0.24f,
+            drawCircle(
+                color = Color(0xFF001016).copy(alpha = 0.96f * exitVisibility),
+                radius = innerRadius * 0.92f,
+                center = exitCenter,
+            )
+
+            // Offset arc segments rotate in opposite directions to create a flowing pull.
+            drawArc(
+                color = Color(0xFF00F5FF).copy(alpha = 0.92f * exitVisibility),
+                startAngle = vortexRotation,
+                sweepAngle = 238f,
+                useCenter = false,
+                topLeft = Offset(exitCenter.x - outerRadius, exitCenter.y - outerRadius),
+                size = Size(outerRadius * 2f, outerRadius * 2f),
+                style = Stroke(width = cell * 0.055f),
+            )
+            drawArc(
+                color = Color(0xFF63FFFF).copy(alpha = 0.78f * exitVisibility),
+                startAngle = -vortexRotation * 1.35f + 112f,
+                sweepAngle = 196f,
+                useCenter = false,
+                topLeft = Offset(exitCenter.x - middleRadius, exitCenter.y - middleRadius),
+                size = Size(middleRadius * 2f, middleRadius * 2f),
+                style = Stroke(width = cell * 0.045f),
+            )
+            drawArc(
+                color = Color(0xFF00BFD4).copy(alpha = 0.95f * exitVisibility),
+                startAngle = vortexRotation * 1.8f + 205f,
+                sweepAngle = 252f,
+                useCenter = false,
+                topLeft = Offset(exitCenter.x - innerRadius, exitCenter.y - innerRadius),
+                size = Size(innerRadius * 2f, innerRadius * 2f),
+                style = Stroke(width = cell * 0.035f),
+            )
+            drawCircle(
+                color = Color(0xFF00F5FF).copy(alpha = 0.8f * exitVisibility),
+                radius = cell * 0.025f,
+                center = exitCenter,
             )
         }
 
