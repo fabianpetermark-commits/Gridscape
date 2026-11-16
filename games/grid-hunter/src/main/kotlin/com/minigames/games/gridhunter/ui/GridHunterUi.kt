@@ -45,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
@@ -319,13 +320,15 @@ fun GridHunterBoardCanvas(
         }
     }
 
-    val nearestEnemyDistance = state.enemies.minOfOrNull {
-        it.position.manhattanDistanceTo(state.player.position)
+    // The exit destabilizes when a hunter gets close to the exit itself,
+    // not merely when the hunter is close to the player.
+    val nearestEnemyToExit = state.enemies.minOfOrNull {
+        it.position.manhattanDistanceTo(state.exitPosition)
     } ?: Int.MAX_VALUE
     val exitVisibility = when {
-        nearestEnemyDistance <= 2 -> 0f
-        nearestEnemyDistance <= 4 -> 0.22f
-        nearestEnemyDistance <= 6 -> 0.55f
+        nearestEnemyToExit <= 1 -> 0.12f
+        nearestEnemyToExit <= 2 -> 0.28f
+        nearestEnemyToExit <= 3 -> 0.58f
         else -> 1f
     }
 
@@ -338,6 +341,7 @@ fun GridHunterBoardCanvas(
 
     val playerPulse by rememberNeonPulse(minScale = 0.90f, maxScale = 1.06f, durationMs = 950)
     val exitPulse by rememberNeonPulse(minScale = 0.88f, maxScale = 1.12f, durationMs = 1900)
+    val atmospherePulse by rememberNeonPulse(minScale = 0.92f, maxScale = 1.04f, durationMs = 9000)
 
     Canvas(
         modifier = modifier.cardinalSwipeInput(
@@ -353,10 +357,41 @@ fun GridHunterBoardCanvas(
             paddingPx = 6f,
         )
 
-        drawRect(color = Color.Black, size = size)
+        // Near-black base with restrained blue atmospheric haze.
+        drawRect(color = Color(0xFF020509), size = size)
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Color(0x18205A78).copy(alpha = atmospherePulse),
+                    Color(0x080A2638),
+                    Color.Transparent,
+                ),
+                center = Offset(size.width * 0.50f, size.height * 0.48f),
+                radius = size.maxDimension * 0.72f,
+            ),
+            size = size,
+        )
+        // Two soft edge fog banks add depth without obscuring the 8x8 board.
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(Color(0x172A7890), Color.Transparent),
+                center = Offset(size.width * 0.06f, size.height * 0.82f),
+                radius = size.maxDimension * 0.42f,
+            ),
+            size = size,
+        )
+        drawRect(
+            brush = Brush.radialGradient(
+                colors = listOf(Color(0x14205D78), Color.Transparent),
+                center = Offset(size.width * 0.94f, size.height * 0.18f),
+                radius = size.maxDimension * 0.38f,
+            ),
+            size = size,
+        )
+
         drawExploredGrid(
             viewport = viewport,
-            lineColor = Color(0xFF252A35),
+            lineColor = Color(0xFF263D50),
             distorted = gridDistorted,
         )
 
@@ -369,6 +404,22 @@ fun GridHunterBoardCanvas(
         }
 
         if (exitVisibility > 0f) {
+            val exitCenter = viewport.cellCenter(state.exitPosition)
+            val exitGlowRadius = viewport.cellSizePx * (0.78f + 0.12f * exitPulse)
+            // Soft radial bloom sits behind the crisp portal core.
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color(0x6600F5FF).copy(alpha = exitVisibility),
+                        Color(0x2200F5FF).copy(alpha = exitVisibility),
+                        Color.Transparent,
+                    ),
+                    center = exitCenter,
+                    radius = exitGlowRadius,
+                ),
+                radius = exitGlowRadius,
+                center = exitCenter,
+            )
             drawNeonEntitySquare(
                 viewport = viewport,
                 gridX = state.exitPosition.x.toFloat(),
