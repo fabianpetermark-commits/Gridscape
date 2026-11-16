@@ -71,7 +71,7 @@ private sealed interface AppRoute {
     data object MainMenu : AppRoute
     data object Settings : AppRoute
     data object DifficultySelect : AppRoute
-    data class Playing(val difficulty: Difficulty) : AppRoute
+    data class Playing(val difficulty: Difficulty, val progressiveMode: Boolean = false) : AppRoute
 }
 
 @Composable
@@ -136,6 +136,9 @@ fun GridscapeApp(
                     onStartDifficulty = { difficulty ->
                         route = AppRoute.Playing(difficulty)
                     },
+                    onStartProgressive = {
+                        route = AppRoute.Playing(Difficulty.EASY, progressiveMode = true)
+                    },
                     onResetStats = {
                         scope.launch { storage.statsRepository.clearStats(GridHunterMeta.ID) }
                     },
@@ -146,16 +149,19 @@ fun GridscapeApp(
             is AppRoute.Playing -> {
                 GridHunterScreen(
                     difficulty = current.difficulty,
+                    progressiveMode = current.progressiveMode,
                     controlMode = settings.controlMode,
                     hapticsEnabled = settings.hapticsEnabled,
                     onGameOver = { elapsedMs, _, _ ->
-                        scope.launch {
-                            storage.statsRepository.recordGameResult(
-                                gameId = GridHunterMeta.ID,
-                                difficulty = current.difficulty,
-                                won = false,
-                                completionTimeMs = elapsedMs,
-                            )
+                        if (!current.progressiveMode) {
+                            scope.launch {
+                                storage.statsRepository.recordGameResult(
+                                    gameId = GridHunterMeta.ID,
+                                    difficulty = current.difficulty,
+                                    won = false,
+                                    completionTimeMs = elapsedMs,
+                                )
+                            }
                         }
                     },
                     onNavigateBack = {
@@ -253,6 +259,7 @@ private fun DifficultySelectScreen(
     game: GameDescriptor,
     statsByDifficulty: Map<Difficulty, GameStats>,
     onStartDifficulty: (Difficulty) -> Unit,
+    onStartProgressive: () -> Unit,
     onResetStats: () -> Unit,
     onBack: () -> Unit,
 ) {
@@ -323,7 +330,35 @@ private fun DifficultySelectScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(18.dp))
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = Alignment.Center,
+        ) {
+            Surface(
+                color = colors.playerCyan.copy(alpha = 0.13f),
+                shape = RoundedCornerShape(14.dp),
+                border = BorderStroke(1.4.dp, colors.playerCyan.copy(alpha = 0.9f)),
+                modifier = Modifier.width(166.dp).height(174.dp).clickable(onClick = onStartProgressive),
+            ) {
+                Column(
+                    modifier = Modifier.padding(14.dp),
+                    verticalArrangement = Arrangement.SpaceBetween,
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
+                    Text("PROGRESSZÍV", color = colors.playerCyan, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.8.sp)
+                    Text(
+                        text = "10 EASY\n5 MEDIUM\n20 HARD\nENDLESS INSANE",
+                        color = colors.textPrimary,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    Text("START CHALLENGE", color = colors.playerCyan, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.7.sp)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(14.dp))
 
         Column(
             modifier = Modifier.fillMaxWidth(),
