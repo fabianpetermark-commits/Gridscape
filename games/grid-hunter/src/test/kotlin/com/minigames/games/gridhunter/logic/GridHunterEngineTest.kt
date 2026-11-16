@@ -17,6 +17,36 @@ class GridHunterEngineTest {
 
     private val engine = GridHunterEngine()
 
+    @Test
+    fun `progressive difficulty follows the agreed level bands`() {
+        assertEquals(Difficulty.EASY, GridHunterConfig.forProgressiveLevel(1).difficulty)
+        assertEquals(Difficulty.EASY, GridHunterConfig.forProgressiveLevel(10).difficulty)
+        assertEquals(Difficulty.MEDIUM, GridHunterConfig.forProgressiveLevel(11).difficulty)
+        assertEquals(Difficulty.MEDIUM, GridHunterConfig.forProgressiveLevel(15).difficulty)
+        assertEquals(Difficulty.HARD, GridHunterConfig.forProgressiveLevel(16).difficulty)
+        assertEquals(Difficulty.HARD, GridHunterConfig.forProgressiveLevel(35).difficulty)
+        assertEquals(Difficulty.INSANE, GridHunterConfig.forProgressiveLevel(36).difficulty)
+    }
+
+    @Test
+    fun `progressive insane speed increases every ten levels without a gameplay cap`() {
+        val base = GridHunterConfig.forProgressiveLevel(36)
+        val firstIncrease = GridHunterConfig.forProgressiveLevel(46)
+        val secondIncrease = GridHunterConfig.forProgressiveLevel(56)
+        val farFuture = GridHunterConfig.forProgressiveLevel(500)
+        assertEquals(0, base.progressiveSpeedStep)
+        assertEquals(1, firstIncrease.progressiveSpeedStep)
+        assertEquals(2, secondIncrease.progressiveSpeedStep)
+        assertTrue(firstIncrease.pursuerIntervalMs < base.pursuerIntervalMs)
+        assertTrue(firstIncrease.interceptorIntervalMs < base.interceptorIntervalMs)
+        assertTrue(secondIncrease.pursuerIntervalMs < firstIncrease.pursuerIntervalMs)
+        assertTrue(secondIncrease.interceptorIntervalMs < firstIncrease.interceptorIntervalMs)
+        assertTrue(farFuture.pursuerIntervalMs < secondIncrease.pursuerIntervalMs)
+        assertTrue(farFuture.interceptorIntervalMs < secondIncrease.interceptorIntervalMs)
+        assertTrue(farFuture.pursuerIntervalMs > 0L)
+        assertTrue(farFuture.interceptorIntervalMs > 0L)
+    }
+
     @ParameterizedTest
     @EnumSource(Difficulty::class)
     fun `generated levels satisfy fairness and reachability invariants across seeds`(

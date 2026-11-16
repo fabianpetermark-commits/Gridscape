@@ -85,6 +85,7 @@ import kotlin.math.sin
 @Composable
 fun GridHunterScreen(
     difficulty: Difficulty,
+    progressiveMode: Boolean = false,
     controlMode: ControlMode = ControlMode.HYBRID,
     hapticsEnabled: Boolean = true,
     onGameOver: (elapsedMs: Long, moves: Int, exitsReached: Int) -> Unit = { _, _, _ -> },
@@ -95,10 +96,11 @@ fun GridHunterScreen(
     val haptics = LocalHapticFeedback.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    val session = remember(difficulty) {
+    val initialConfig = if (progressiveMode) GridHunterConfig.forProgressiveLevel(1) else GridHunterConfig.forDifficulty(difficulty)
+    val session = remember(difficulty, progressiveMode) {
         GameSession(
             engine = GridHunterEngine(),
-            initialConfig = GridHunterConfig.forDifficulty(difficulty),
+            initialConfig = initialConfig,
         )
     }
 
@@ -153,7 +155,9 @@ fun GridHunterScreen(
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
         GridHunterTopBar(
-            difficulty = difficulty,
+            difficulty = state.config.difficulty,
+            progressiveMode = progressiveMode,
+            levelNumber = state.exitsReached + 1,
             elapsedTimeMs = state.elapsedPlayTimeMs,
             moveCount = state.moveCount,
             exitsReached = state.exitsReached,
@@ -189,7 +193,7 @@ fun GridHunterScreen(
                     onResume = { session.resume() },
                     onRestart = {
                         gameOverReported = false
-                        session.reset(GridHunterConfig.forDifficulty(difficulty))
+                        session.reset(if (progressiveMode) GridHunterConfig.forProgressiveLevel(1) else GridHunterConfig.forDifficulty(difficulty))
                     },
                     onExit = onNavigateBack,
                 )
@@ -211,6 +215,8 @@ fun GridHunterScreen(
 @Composable
 private fun GridHunterTopBar(
     difficulty: Difficulty,
+    progressiveMode: Boolean,
+    levelNumber: Int,
     elapsedTimeMs: Long,
     moveCount: Int,
     exitsReached: Int,
@@ -234,13 +240,36 @@ private fun GridHunterTopBar(
         }
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = "GRID HUNTER \u00b7 ${difficulty.name}",
-                color = colors.playerCyan,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.4.sp,
-            )
+            if (progressiveMode) {
+                val accent = when (difficulty) {
+                    Difficulty.EASY -> colors.exitGreen
+                    Difficulty.MEDIUM -> colors.playerCyan
+                    Difficulty.HARD -> colors.accentAmber
+                    Difficulty.INSANE -> colors.enemyRed
+                }
+                Surface(
+                    color = accent.copy(alpha = 0.18f),
+                    shape = RoundedCornerShape(4.dp),
+                    border = BorderStroke(0.8.dp, accent.copy(alpha = 0.75f)),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(difficulty.name, color = accent, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.6.sp)
+                        Text(levelNumber.toString().padStart(3, '0'), color = colors.textPrimary, fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                    }
+                }
+            } else {
+                Text(
+                    text = "GRID HUNTER \u00b7 ${difficulty.name}",
+                    color = colors.playerCyan,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.4.sp,
+                )
+            }
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = "${formatDurationSeconds(elapsedTimeMs)}  \u2022  \u29bf$exitsReached  \u2022  ${moveCount}mv",
