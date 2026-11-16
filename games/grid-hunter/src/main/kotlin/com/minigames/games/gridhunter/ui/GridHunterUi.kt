@@ -358,7 +358,6 @@ fun GridHunterBoardCanvas(
 
     val playerPulse by rememberNeonPulse(minScale = 0.90f, maxScale = 1.06f, durationMs = 950)
     val exitPulse by rememberNeonPulse(minScale = 0.88f, maxScale = 1.12f, durationMs = 1900)
-    val atmospherePulse by rememberNeonPulse(minScale = 0.92f, maxScale = 1.04f, durationMs = 9000)
     var vortexRotation by remember(state.seed) {
         mutableFloatStateOf(0f)
     }
@@ -397,37 +396,8 @@ fun GridHunterBoardCanvas(
             paddingPx = 6f,
         )
 
-        // Near-black base with restrained blue atmospheric haze.
+        // Clean near-black background: no ambient glow behind the grid.
         drawRect(color = Color(0xFF020509), size = size)
-        drawRect(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    Color(0x18205A78).copy(alpha = atmospherePulse),
-                    Color(0x080A2638),
-                    Color.Transparent,
-                ),
-                center = Offset(size.width * 0.50f, size.height * 0.48f),
-                radius = size.maxDimension * 0.72f,
-            ),
-            size = size,
-        )
-        // Two soft edge fog banks add depth without obscuring the 8x8 board.
-        drawRect(
-            brush = Brush.radialGradient(
-                colors = listOf(Color(0x172A7890), Color.Transparent),
-                center = Offset(size.width * 0.06f, size.height * 0.82f),
-                radius = size.maxDimension * 0.42f,
-            ),
-            size = size,
-        )
-        drawRect(
-            brush = Brush.radialGradient(
-                colors = listOf(Color(0x14205D78), Color.Transparent),
-                center = Offset(size.width * 0.94f, size.height * 0.18f),
-                radius = size.maxDimension * 0.38f,
-            ),
-            size = size,
-        )
 
         drawExploredGrid(
             viewport = viewport,
@@ -435,10 +405,12 @@ fun GridHunterBoardCanvas(
             distorted = gridDistorted,
         )
 
+        // Insane mode keeps every obstacle fixed and visible from the start.
+        val alwaysShowObstacles = state.config.difficulty == Difficulty.INSANE
         for (obstacle in state.obstacles) {
             val discovered = obstacle in exploredCells ||
                 state.bounds.validNeighbors(obstacle).any { it in exploredCells }
-            if (discovered) {
+            if (alwaysShowObstacles || discovered) {
                 drawNeonObstacleCell(viewport = viewport, point = obstacle, colors = colors)
             }
         }
@@ -448,9 +420,10 @@ fun GridHunterBoardCanvas(
             val cell = viewport.cellSizePx
             val vortexScale = exitPulse
 
-            val outerRadius = cell * (0.47f + 0.08f * vortexScale)
-            val middleRadius = cell * 0.31f
-            val innerRadius = cell * 0.17f
+            // Keep every ring, particle and glow safely inside this one grid cell.
+            val outerRadius = cell * (0.265f + 0.025f * vortexScale)
+            val middleRadius = cell * 0.185f
+            val innerRadius = cell * 0.105f
 
             drawCircle(
                 brush = Brush.radialGradient(
@@ -461,9 +434,9 @@ fun GridHunterBoardCanvas(
                         Color.Transparent,
                     ),
                     center = exitCenter,
-                    radius = outerRadius * 1.9f,
+                    radius = outerRadius * 1.28f,
                 ),
-                radius = outerRadius * 1.9f,
+                radius = outerRadius * 1.28f,
                 center = exitCenter,
             )
 
@@ -504,7 +477,7 @@ fun GridHunterBoardCanvas(
             )
 
             val particleCount = 18
-            val startRadius = outerRadius * 1.55f
+            val startRadius = outerRadius * 1.04f
             val endRadius = innerRadius * 0.35f
 
             for (i in 0 until particleCount) {
