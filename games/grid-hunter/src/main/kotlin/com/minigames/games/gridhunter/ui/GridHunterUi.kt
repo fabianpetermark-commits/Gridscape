@@ -1,5 +1,14 @@
 package com.minigames.games.gridhunter.ui
 
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.tween
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.graphics.StrokeCap
+import kotlin.math.PI
+import kotlin.math.cos
+import kotlin.math.pow
+import kotlin.math.sin
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -44,8 +53,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -85,6 +97,7 @@ import kotlin.math.sin
 @Composable
 fun GridHunterScreen(
     difficulty: Difficulty,
+    progressiveMode: Boolean = false,
     controlMode: ControlMode = ControlMode.HYBRID,
     hapticsEnabled: Boolean = true,
     onGameOver: (elapsedMs: Long, moves: Int, exitsReached: Int) -> Unit = { _, _, _ -> },
@@ -95,10 +108,11 @@ fun GridHunterScreen(
     val haptics = LocalHapticFeedback.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
-    val session = remember(difficulty) {
+    val initialConfig = if (progressiveMode) GridHunterConfig.forProgressiveLevel(1) else GridHunterConfig.forDifficulty(difficulty)
+    val session = remember(difficulty, progressiveMode) {
         GameSession(
             engine = GridHunterEngine(),
-            initialConfig = GridHunterConfig.forDifficulty(difficulty),
+            initialConfig = initialConfig,
         )
     }
 
@@ -153,7 +167,9 @@ fun GridHunterScreen(
         verticalArrangement = Arrangement.SpaceBetween,
     ) {
         GridHunterTopBar(
-            difficulty = difficulty,
+            difficulty = state.config.difficulty,
+            progressiveMode = progressiveMode,
+            levelNumber = state.exitsReached + 1,
             elapsedTimeMs = state.elapsedPlayTimeMs,
             moveCount = state.moveCount,
             exitsReached = state.exitsReached,
@@ -189,7 +205,7 @@ fun GridHunterScreen(
                     onResume = { session.resume() },
                     onRestart = {
                         gameOverReported = false
-                        session.reset(GridHunterConfig.forDifficulty(difficulty))
+                        session.reset(if (progressiveMode) GridHunterConfig.forProgressiveLevel(1) else GridHunterConfig.forDifficulty(difficulty))
                     },
                     onExit = onNavigateBack,
                 )
@@ -211,6 +227,8 @@ fun GridHunterScreen(
 @Composable
 private fun GridHunterTopBar(
     difficulty: Difficulty,
+    progressiveMode: Boolean,
+    levelNumber: Int,
     elapsedTimeMs: Long,
     moveCount: Int,
     exitsReached: Int,
@@ -234,13 +252,36 @@ private fun GridHunterTopBar(
         }
 
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                text = "GRID HUNTER \u00b7 ${difficulty.name}",
-                color = colors.playerCyan,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                letterSpacing = 1.4.sp,
-            )
+            if (progressiveMode) {
+                val accent = when (difficulty) {
+                    Difficulty.EASY -> colors.exitGreen
+                    Difficulty.MEDIUM -> colors.playerCyan
+                    Difficulty.HARD -> colors.accentAmber
+                    Difficulty.INSANE -> colors.enemyRed
+                }
+                Surface(
+                    color = accent.copy(alpha = 0.18f),
+                    shape = RoundedCornerShape(4.dp),
+                    border = BorderStroke(0.8.dp, accent.copy(alpha = 0.75f)),
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(difficulty.name, color = accent, fontSize = 9.sp, fontWeight = FontWeight.ExtraBold, letterSpacing = 0.6.sp)
+                        Text(levelNumber.toString().padStart(3, '0'), color = colors.textPrimary, fontSize = 9.sp, fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold)
+                    }
+                }
+            } else {
+                Text(
+                    text = "GRID HUNTER \u00b7 ${difficulty.name}",
+                    color = colors.playerCyan,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    letterSpacing = 1.4.sp,
+                )
+            }
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = "${formatDurationSeconds(elapsedTimeMs)}  \u2022  \u29bf$exitsReached  \u2022  ${moveCount}mv",
@@ -290,15 +331,23 @@ fun GridHunterBoardCanvas(
         }
     }
 
-    val nearestEnemyDistance = state.enemies.minOfOrNull {
-        it.position.manhattanDistanceTo(state.player.position)
-    } ?: Int.MAX_VALUE
-    val exitVisibility = when {
-        nearestEnemyDistance <= 2 -> 0f
-        nearestEnemyDistance <= 4 -> 0.22f
-        nearestEnemyDistance <= 6 -> 0.55f
+    // The exit destabilizes when a hunter gets close to the exit itself.
+    val nearestEnemyToExit = remember(state.enemies, state.exitPosition) {
+        state.enemies.minOfOrNull {
+            it.position.manhattanDistanceTo(state.exitPosition)
+        } ?: Int.MAX_VALUE
+    }
+    val targetExitVisibility = when {
+        nearestEnemyToExit <= 1 -> 0.12f
+        nearestEnemyToExit <= 2 -> 0.28f
+        nearestEnemyToExit <= 3 -> 0.58f
         else -> 1f
     }
+    val exitVisibility by animateFloatAsState(
+        targetValue = targetExitVisibility,
+        animationSpec = tween(durationMillis = 250),
+        label = "exitVisibility"
+    )
 
     val animatedPlayer = rememberAnimatedGridPoint(target = state.player.position, durationMs = 65)
     val animatedEnemies = state.enemies.map { enemy ->
@@ -309,6 +358,29 @@ fun GridHunterBoardCanvas(
 
     val playerPulse by rememberNeonPulse(minScale = 0.90f, maxScale = 1.06f, durationMs = 950)
     val exitPulse by rememberNeonPulse(minScale = 0.88f, maxScale = 1.12f, durationMs = 1900)
+    var vortexRotation by remember(state.seed) {
+        mutableFloatStateOf(0f)
+    }
+    var particleTime by remember(state.seed) {
+        mutableFloatStateOf(0f)
+    }
+
+    LaunchedEffect(state.phase, state.seed) {
+        if (state.phase == GamePhase.PLAYING) {
+            var lastFrameNanos = withFrameNanos { it }
+            while (true) {
+                val frameNanos = withFrameNanos { it }
+                val deltaSeconds = (frameNanos - lastFrameNanos) / 1_000_000_000f
+                lastFrameNanos = frameNanos
+
+                vortexRotation = (vortexRotation + 156.25f * deltaSeconds) % 7200f
+                particleTime = (particleTime + deltaSeconds) % 3600f
+            }
+        } else {
+            vortexRotation = 0f
+            particleTime = 0f
+        }
+    }
 
     Canvas(
         modifier = modifier.cardinalSwipeInput(
@@ -324,30 +396,137 @@ fun GridHunterBoardCanvas(
             paddingPx = 6f,
         )
 
-        drawRect(color = Color.Black, size = size)
+        // Clean near-black background: no ambient glow behind the grid.
+        drawRect(color = Color(0xFF020509), size = size)
+
         drawExploredGrid(
             viewport = viewport,
-            lineColor = Color(0xFF252A35),
+            lineColor = Color(0xFF263D50),
             distorted = gridDistorted,
         )
 
+        // Insane mode keeps every obstacle fixed and visible from the start.
+        val alwaysShowObstacles = state.config.difficulty == Difficulty.INSANE
         for (obstacle in state.obstacles) {
             val discovered = obstacle in exploredCells ||
                 state.bounds.validNeighbors(obstacle).any { it in exploredCells }
-            if (discovered) {
+            if (alwaysShowObstacles || discovered) {
                 drawNeonObstacleCell(viewport = viewport, point = obstacle, colors = colors)
             }
         }
 
         if (exitVisibility > 0f) {
-            drawNeonEntitySquare(
-                viewport = viewport,
-                gridX = state.exitPosition.x.toFloat(),
-                gridY = state.exitPosition.y.toFloat(),
-                coreColor = Color(0xFF00F5FF).copy(alpha = exitVisibility),
-                glowColor = Color(0x4D00F5FF).copy(alpha = exitVisibility),
-                pulseScale = exitPulse,
-                insetRatio = 0.24f,
+            val exitCenter = viewport.cellCenter(state.exitPosition)
+            val cell = viewport.cellSizePx
+            val vortexScale = exitPulse
+
+            // Keep every ring, particle and glow safely inside this one grid cell.
+            val outerRadius = cell * (0.265f + 0.025f * vortexScale)
+            val middleRadius = cell * 0.185f
+            val innerRadius = cell * 0.105f
+
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(
+                        Color(0xFF00151C).copy(alpha = exitVisibility),
+                        Color(0xCC002B35).copy(alpha = exitVisibility),
+                        Color(0x6600F5FF).copy(alpha = exitVisibility),
+                        Color.Transparent,
+                    ),
+                    center = exitCenter,
+                    radius = outerRadius * 1.28f,
+                ),
+                radius = outerRadius * 1.28f,
+                center = exitCenter,
+            )
+
+            drawCircle(
+                color = Color(0xFF001016).copy(alpha = 0.96f * exitVisibility),
+                radius = innerRadius * 0.92f,
+                center = exitCenter,
+            )
+
+            drawArc(
+                color = Color(0xFF00F5FF).copy(alpha = 0.92f * exitVisibility),
+                startAngle = vortexRotation,
+                sweepAngle = 238f,
+                useCenter = false,
+                topLeft = Offset(exitCenter.x - outerRadius, exitCenter.y - outerRadius),
+                size = Size(outerRadius * 2f, outerRadius * 2f),
+                style = Stroke(width = cell * 0.055f, cap = StrokeCap.Round),
+            )
+
+            drawArc(
+                color = Color(0xFF63FFFF).copy(alpha = 0.78f * exitVisibility),
+                startAngle = -vortexRotation * 1.35f + 112f,
+                sweepAngle = 196f,
+                useCenter = false,
+                topLeft = Offset(exitCenter.x - middleRadius, exitCenter.y - middleRadius),
+                size = Size(middleRadius * 2f, middleRadius * 2f),
+                style = Stroke(width = cell * 0.045f, cap = StrokeCap.Round),
+            )
+
+            drawArc(
+                color = Color(0xFF00BFD4).copy(alpha = 0.95f * exitVisibility),
+                startAngle = vortexRotation * 1.8f + 205f,
+                sweepAngle = 252f,
+                useCenter = false,
+                topLeft = Offset(exitCenter.x - innerRadius, exitCenter.y - innerRadius),
+                size = Size(innerRadius * 2f, innerRadius * 2f),
+                style = Stroke(width = cell * 0.035f, cap = StrokeCap.Round),
+            )
+
+            val particleCount = 18
+            val startRadius = outerRadius * 1.04f
+            val endRadius = innerRadius * 0.35f
+
+            for (i in 0 until particleCount) {
+                val phaseOffset = (i * 0.6180339f) % 1f
+                val baseAngleDeg = (i * 137.508f) % 360f
+                val speed = when (i % 3) {
+                    0 -> 0.5f
+                    1 -> 0.75f
+                    else -> 1.0f
+                }
+
+                val progress = (particleTime * speed + phaseOffset) % 1f
+                val radialEase = progress.pow(1.45f)
+                val currentRadius = startRadius + (endRadius - startRadius) * radialEase
+
+                val angleDeg = baseAngleDeg + 290f * progress.pow(1.35f)
+                val angleRad = angleDeg * (PI.toFloat() / 180f)
+
+                val particlePos = Offset(
+                    x = exitCenter.x + cos(angleRad) * currentRadius,
+                    y = exitCenter.y + sin(angleRad) * currentRadius,
+                )
+
+                val fadeIn = (progress / 0.2f).coerceIn(0f, 1f)
+                val fadeOut = ((1f - progress) / 0.22f).coerceIn(0f, 1f)
+                val particleAlpha = fadeIn * fadeOut * exitVisibility
+
+                if (particleAlpha > 0.01f) {
+                    val baseDotRadius = cell * (0.012f + 0.005f * (i % 3))
+                    val dotRadius = baseDotRadius * (1f - 0.45f * progress)
+
+                    drawCircle(
+                        color = Color(0xFF00F5FF).copy(alpha = 0.28f * particleAlpha),
+                        radius = dotRadius * 2.4f,
+                        center = particlePos,
+                    )
+
+                    drawCircle(
+                        color = Color(0xFFB8FFFF).copy(alpha = 0.95f * particleAlpha),
+                        radius = dotRadius,
+                        center = particlePos,
+                    )
+                }
+            }
+
+            drawCircle(
+                color = Color(0xFF00F5FF).copy(alpha = 0.8f * exitVisibility),
+                radius = cell * 0.025f,
+                center = exitCenter,
             )
         }
 

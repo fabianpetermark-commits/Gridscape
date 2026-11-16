@@ -11,6 +11,7 @@ import com.minigames.core.models.GamePhase
 import com.minigames.core.models.GridBounds
 import com.minigames.core.models.GridPoint
 import kotlin.random.Random
+import kotlin.math.roundToLong
 
 // ============================================================================
 // 1. Metadata, Configuration & Commands
@@ -39,6 +40,9 @@ data class GridHunterConfig(
     val interceptorIntervalMs: Long = 750L,
     val playerMoveCooldownMs: Long = 80L,
     val obstacleCountRange: IntRange = 0..0,
+    val progressiveMode: Boolean = false,
+    val progressiveLevel: Int = 1,
+    val progressiveSpeedStep: Int = 0,
 ) {
     init {
         require(pursuerIntervalMs > 0L) { "pursuerIntervalMs must be > 0" }
@@ -47,6 +51,27 @@ data class GridHunterConfig(
     }
 
     companion object {
+        fun forProgressiveLevel(levelNumber: Int): GridHunterConfig {
+            require(levelNumber >= 1) { "levelNumber must be >= 1" }
+            val difficulty = when (levelNumber) {
+                in 1..10 -> Difficulty.EASY
+                in 11..15 -> Difficulty.MEDIUM
+                in 16..35 -> Difficulty.HARD
+                else -> Difficulty.INSANE
+            }
+            val speedStep = if (levelNumber >= 46) (levelNumber - 36) / 10 else 0
+            val base = forDifficulty(difficulty)
+            val speedMultiplier = 1.0 + (0.03 * speedStep)
+            return base.copy(
+                progressiveMode = true,
+                progressiveLevel = levelNumber,
+                progressiveSpeedStep = speedStep,
+                // The existing scheduler controls both enemy movement and AI decisions.
+                pursuerIntervalMs = (base.pursuerIntervalMs / speedMultiplier).roundToLong().coerceAtLeast(1L),
+                interceptorIntervalMs = (base.interceptorIntervalMs / speedMultiplier).roundToLong().coerceAtLeast(1L),
+            )
+        }
+
         fun forDifficulty(difficulty: Difficulty): GridHunterConfig = when (difficulty) {
             Difficulty.EASY -> GridHunterConfig(
                 difficulty = Difficulty.EASY,
@@ -402,7 +427,8 @@ object GridHunterLevelGenerator {
         existingState: GridHunterState,
         roundSeed: Long = System.nanoTime(),
     ): GridHunterState {
-        val config = existingState.config
+        val nextLevelNumber = existingState.exitsReached + 2
+        val config = if (existingState.config.progressiveMode) GridHunterConfig.forProgressiveLevel(nextLevelNumber) else existingState.config
         val random = Random(roundSeed)
         val allPoints = config.bounds.allPoints()
 
