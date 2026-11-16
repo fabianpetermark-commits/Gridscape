@@ -11,7 +11,6 @@ import com.minigames.core.models.GamePhase
 import com.minigames.core.models.GridBounds
 import com.minigames.core.models.GridPoint
 import kotlin.random.Random
-import kotlin.math.pow
 import kotlin.math.roundToLong
 
 // ============================================================================
@@ -62,7 +61,7 @@ data class GridHunterConfig(
             }
             val speedStep = if (levelNumber >= 46) (levelNumber - 36) / 10 else 0
             val base = forDifficulty(difficulty)
-            val speedMultiplier = 1.03.pow(speedStep.toDouble())
+            val speedMultiplier = 1.0 + (0.03 * speedStep)
             return base.copy(
                 progressiveMode = true,
                 progressiveLevel = levelNumber,
