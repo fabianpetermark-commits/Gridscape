@@ -506,7 +506,7 @@ private fun GridHunterPhaseOverlay(
 
     Surface(
         color = colors.surface.copy(alpha = 0.92f),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(16.dp),
         border = BorderStroke(1.5.dp, accent.copy(alpha = 0.7f)),
         modifier = Modifier.padding(20.dp),
     ) {
@@ -607,7 +607,7 @@ private fun DpadArrowButton(
     FilledTonalButton(
         onClick = onClick,
         enabled = enabled,
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(18.dp),
         border = BorderStroke(1.dp, colors.playerCyan.copy(alpha = 0.48f)),
         colors = ButtonDefaults.filledTonalButtonColors(
             containerColor = colors.surfaceElevated,
