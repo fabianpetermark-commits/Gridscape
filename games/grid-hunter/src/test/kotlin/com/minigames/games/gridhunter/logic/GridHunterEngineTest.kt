@@ -96,6 +96,51 @@ class GridHunterEngineTest {
         }
     }
 
+
+    @Test
+    fun `difficulty levels use the intended enemy roles and counts`() {
+        assertEquals(
+            listOf(EnemyRole.PURSUER),
+            engine.createInitialState(GridHunterConfig.forDifficulty(Difficulty.EASY), seed = 1L)
+                .enemies.map { it.role },
+        )
+        assertEquals(
+            listOf(EnemyRole.INTERCEPTOR),
+            engine.createInitialState(GridHunterConfig.forDifficulty(Difficulty.MEDIUM), seed = 1L)
+                .enemies.map { it.role },
+        )
+        assertEquals(
+            listOf(EnemyRole.PURSUER, EnemyRole.INTERCEPTOR),
+            engine.createInitialState(GridHunterConfig.forDifficulty(Difficulty.HARD), seed = 1L)
+                .enemies.map { it.role },
+        )
+        assertEquals(
+            listOf(EnemyRole.PURSUER, EnemyRole.INTERCEPTOR),
+            engine.createInitialState(GridHunterConfig.forDifficulty(Difficulty.INSANE), seed = 1L)
+                .enemies.map { it.role },
+        )
+    }
+
+    @Test
+    fun `interceptor target stays stable until the player moves`() {
+        val initial = engine.createInitialState(
+            GridHunterConfig.forDifficulty(Difficulty.MEDIUM),
+            seed = 42L,
+        )
+        val enemy = initial.enemies.single()
+        val standingStill = initial.copy(
+            phase = GamePhase.PLAYING,
+            elapsedPlayTimeMs = 0L,
+            moveCount = 0,
+        )
+        val laterWhileStill = standingStill.copy(elapsedPlayTimeMs = 5_000L)
+
+        assertEquals(
+            GridHunterAi.chooseNextPosition(standingStill, enemy),
+            GridHunterAi.chooseNextPosition(laterWhileStill, enemy),
+        )
+    }
+
     @Test
     fun `player movement respects grid boundaries and obstacles`() {
         val baseState = GridHunterState(

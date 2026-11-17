@@ -366,7 +366,9 @@ object GridHunterAi {
                 .filter { it !in blocked }
 
             if (candidates.isNotEmpty()) {
-                val jitterSeed = enemy.interceptorJitterSeed xor (state.elapsedPlayTimeMs / 500L)
+                // Keep the interception choice stable while the player stands still; only
+                // reconsider it after a player move, avoiding target flicker between enemy turns.
+                val jitterSeed = enemy.interceptorJitterSeed xor state.moveCount.toLong()
                 return candidates[Random(jitterSeed).nextInt(candidates.size)]
             }
         }

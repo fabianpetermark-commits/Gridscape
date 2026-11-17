@@ -576,8 +576,9 @@ fun NeonTouchDpad(
     onDirection: (Direction) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val buttonSize = 68.dp
-    val spacing = 10.dp
+    // Larger controls improve accuracy without changing the input behavior.
+    val buttonSize = 84.dp
+    val spacing = 6.dp
 
     Column(
         modifier = modifier,
@@ -606,8 +607,8 @@ private fun DpadArrowButton(
     FilledTonalButton(
         onClick = onClick,
         enabled = enabled,
-        shape = RoundedCornerShape(16.dp),
-        border = BorderStroke(1.dp, colors.boardOuterBorder),
+        shape = RoundedCornerShape(18.dp),
+        border = BorderStroke(1.dp, colors.playerCyan.copy(alpha = 0.48f)),
         colors = ButtonDefaults.filledTonalButtonColors(
             containerColor = colors.surfaceElevated,
             contentColor = colors.playerCyan,
@@ -617,7 +618,7 @@ private fun DpadArrowButton(
         contentPadding = PaddingValues(0.dp),
         modifier = modifier,
     ) {
-        Icon(imageVector = icon, contentDescription = contentDescription, modifier = Modifier.size(34.dp))
+        Icon(imageVector = icon, contentDescription = contentDescription, modifier = Modifier.size(44.dp))
     }
 }
 
