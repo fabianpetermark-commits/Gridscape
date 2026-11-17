@@ -76,20 +76,33 @@ private class GridHunterPrototypeScreen(
             override fun touchUp(screenX: Int, screenY: Int, pointer: Int, button: Int): Boolean {
                 val dx = screenX - touchStartX
                 val dy = touchStartY - screenY
-                val direction = if (kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
-                    if (dx >= 0f) Direction.RIGHT else Direction.LEFT
-                } else {
-                    if (dy >= 0f) Direction.UP else Direction.DOWN
-                }
+                val swipeThreshold = 24f
+                val isSwipe = dx * dx + dy * dy >= swipeThreshold * swipeThreshold
                 val snapshot = state ?: return true
-                if (snapshot.phase == GamePhase.READY) session.start()
-                if (snapshot.phase == GamePhase.READY || snapshot.phase == GamePhase.PLAYING) {
-                    session.dispatchCommand(GridHunterCommand.Move(direction))
-                } else if (snapshot.phase == GamePhase.PAUSED) {
-                    session.resume()
-                } else if (snapshot.phase == GamePhase.GAME_OVER || snapshot.phase == GamePhase.VICTORY) {
-                    session.reset(GridHunterConfig.forDifficulty(difficulty))
+
+                // A tap is a UI action only; it must never be interpreted as a rightward move.
+                if (!isSwipe) {
+                    when (snapshot.phase) {
+                        GamePhase.READY -> session.start()
+                        GamePhase.PAUSED -> session.resume()
+                        GamePhase.GAME_OVER, GamePhase.VICTORY ->
+                            session.reset(GridHunterConfig.forDifficulty(difficulty))
+                        else -> Unit
+                    }
+                    return true
                 }
+
+                if (snapshot.phase != GamePhase.READY && snapshot.phase != GamePhase.PLAYING) {
+                    return true
+                }
+
+                val direction = if (kotlin.math.abs(dx) > kotlin.math.abs(dy)) {
+                    if (dx > 0f) Direction.RIGHT else Direction.LEFT
+                } else {
+                    if (dy > 0f) Direction.UP else Direction.DOWN
+                }
+                if (snapshot.phase == GamePhase.READY) session.start()
+                session.dispatchCommand(GridHunterCommand.Move(direction))
                 return true
             }
         }
