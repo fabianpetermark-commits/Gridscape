@@ -2,13 +2,7 @@ package com.minigames.games.gridhunter.ui
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.runtime.mutableFloatStateOf
-import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.graphics.StrokeCap
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.pow
-import kotlin.math.sin
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -55,7 +49,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -357,30 +350,6 @@ fun GridHunterBoardCanvas(
     }
 
     val playerPulse by rememberNeonPulse(minScale = 0.90f, maxScale = 1.06f, durationMs = 950)
-    val exitPulse by rememberNeonPulse(minScale = 0.88f, maxScale = 1.12f, durationMs = 1900)
-    var vortexRotation by remember(state.seed) {
-        mutableFloatStateOf(0f)
-    }
-    var particleTime by remember(state.seed) {
-        mutableFloatStateOf(0f)
-    }
-
-    LaunchedEffect(state.phase, state.seed) {
-        if (state.phase == GamePhase.PLAYING) {
-            var lastFrameNanos = withFrameNanos { it }
-            while (true) {
-                val frameNanos = withFrameNanos { it }
-                val deltaSeconds = (frameNanos - lastFrameNanos) / 1_000_000_000f
-                lastFrameNanos = frameNanos
-
-                vortexRotation = (vortexRotation + 156.25f * deltaSeconds) % 7200f
-                particleTime = (particleTime + deltaSeconds) % 3600f
-            }
-        } else {
-            vortexRotation = 0f
-            particleTime = 0f
-        }
-    }
 
     Canvas(
         modifier = modifier.cardinalSwipeInput(
@@ -418,115 +387,62 @@ fun GridHunterBoardCanvas(
         if (exitVisibility > 0f) {
             val exitCenter = viewport.cellCenter(state.exitPosition)
             val cell = viewport.cellSizePx
-            val vortexScale = exitPulse
+            val gateRadius = cell * 0.31f
+            val gateBounds = Offset(exitCenter.x - gateRadius, exitCenter.y - gateRadius)
 
-            // Keep every ring, particle and glow safely inside this one grid cell.
-            val outerRadius = cell * (0.265f + 0.025f * vortexScale)
-            val middleRadius = cell * 0.185f
-            val innerRadius = cell * 0.105f
+            // A stationary neon doorway: rounded arch with two straight side posts.
+            val leftPost = Offset(exitCenter.x - gateRadius, exitCenter.y)
+            val rightPost = Offset(exitCenter.x + gateRadius, exitCenter.y)
+            val postBottomY = exitCenter.y + cell * 0.46f
 
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(
-                        Color(0xFF00151C).copy(alpha = exitVisibility),
-                        Color(0xCC002B35).copy(alpha = exitVisibility),
-                        Color(0x6600F5FF).copy(alpha = exitVisibility),
-                        Color.Transparent,
-                    ),
-                    center = exitCenter,
-                    radius = outerRadius * 1.28f,
-                ),
-                radius = outerRadius * 1.28f,
-                center = exitCenter,
-            )
-
-            drawCircle(
-                color = Color(0xFF001016).copy(alpha = 0.96f * exitVisibility),
-                radius = innerRadius * 0.92f,
-                center = exitCenter,
-            )
-
+            // Soft outer neon edge.
             drawArc(
-                color = Color(0xFF00F5FF).copy(alpha = 0.92f * exitVisibility),
-                startAngle = vortexRotation,
-                sweepAngle = 238f,
+                color = Color(0xFF00F5FF).copy(alpha = 0.28f * exitVisibility),
+                startAngle = 180f,
+                sweepAngle = 180f,
                 useCenter = false,
-                topLeft = Offset(exitCenter.x - outerRadius, exitCenter.y - outerRadius),
-                size = Size(outerRadius * 2f, outerRadius * 2f),
-                style = Stroke(width = cell * 0.055f, cap = StrokeCap.Round),
+                topLeft = gateBounds,
+                size = Size(gateRadius * 2f, gateRadius * 2f),
+                style = Stroke(width = cell * 0.14f, cap = StrokeCap.Round),
+            )
+            drawLine(
+                color = Color(0xFF00F5FF).copy(alpha = 0.28f * exitVisibility),
+                start = leftPost,
+                end = Offset(leftPost.x, postBottomY),
+                strokeWidth = cell * 0.14f,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = Color(0xFF00F5FF).copy(alpha = 0.28f * exitVisibility),
+                start = rightPost,
+                end = Offset(rightPost.x, postBottomY),
+                strokeWidth = cell * 0.14f,
+                cap = StrokeCap.Round,
             )
 
+            // Bright inner neon core.
             drawArc(
-                color = Color(0xFF63FFFF).copy(alpha = 0.78f * exitVisibility),
-                startAngle = -vortexRotation * 1.35f + 112f,
-                sweepAngle = 196f,
+                color = Color(0xFFB8FFFF).copy(alpha = 0.98f * exitVisibility),
+                startAngle = 180f,
+                sweepAngle = 180f,
                 useCenter = false,
-                topLeft = Offset(exitCenter.x - middleRadius, exitCenter.y - middleRadius),
-                size = Size(middleRadius * 2f, middleRadius * 2f),
+                topLeft = gateBounds,
+                size = Size(gateRadius * 2f, gateRadius * 2f),
                 style = Stroke(width = cell * 0.045f, cap = StrokeCap.Round),
             )
-
-            drawArc(
-                color = Color(0xFF00BFD4).copy(alpha = 0.95f * exitVisibility),
-                startAngle = vortexRotation * 1.8f + 205f,
-                sweepAngle = 252f,
-                useCenter = false,
-                topLeft = Offset(exitCenter.x - innerRadius, exitCenter.y - innerRadius),
-                size = Size(innerRadius * 2f, innerRadius * 2f),
-                style = Stroke(width = cell * 0.035f, cap = StrokeCap.Round),
+            drawLine(
+                color = Color(0xFFB8FFFF).copy(alpha = 0.98f * exitVisibility),
+                start = leftPost,
+                end = Offset(leftPost.x, postBottomY),
+                strokeWidth = cell * 0.045f,
+                cap = StrokeCap.Round,
             )
-
-            val particleCount = 18
-            val startRadius = outerRadius * 1.04f
-            val endRadius = innerRadius * 0.35f
-
-            for (i in 0 until particleCount) {
-                val phaseOffset = (i * 0.6180339f) % 1f
-                val baseAngleDeg = (i * 137.508f) % 360f
-                val speed = when (i % 3) {
-                    0 -> 0.5f
-                    1 -> 0.75f
-                    else -> 1.0f
-                }
-
-                val progress = (particleTime * speed + phaseOffset) % 1f
-                val radialEase = progress.pow(1.45f)
-                val currentRadius = startRadius + (endRadius - startRadius) * radialEase
-
-                val angleDeg = baseAngleDeg + 290f * progress.pow(1.35f)
-                val angleRad = angleDeg * (PI.toFloat() / 180f)
-
-                val particlePos = Offset(
-                    x = exitCenter.x + cos(angleRad) * currentRadius,
-                    y = exitCenter.y + sin(angleRad) * currentRadius,
-                )
-
-                val fadeIn = (progress / 0.2f).coerceIn(0f, 1f)
-                val fadeOut = ((1f - progress) / 0.22f).coerceIn(0f, 1f)
-                val particleAlpha = fadeIn * fadeOut * exitVisibility
-
-                if (particleAlpha > 0.01f) {
-                    val baseDotRadius = cell * (0.012f + 0.005f * (i % 3))
-                    val dotRadius = baseDotRadius * (1f - 0.45f * progress)
-
-                    drawCircle(
-                        color = Color(0xFF00F5FF).copy(alpha = 0.28f * particleAlpha),
-                        radius = dotRadius * 2.4f,
-                        center = particlePos,
-                    )
-
-                    drawCircle(
-                        color = Color(0xFFB8FFFF).copy(alpha = 0.95f * particleAlpha),
-                        radius = dotRadius,
-                        center = particlePos,
-                    )
-                }
-            }
-
-            drawCircle(
-                color = Color(0xFF00F5FF).copy(alpha = 0.8f * exitVisibility),
-                radius = cell * 0.025f,
-                center = exitCenter,
+            drawLine(
+                color = Color(0xFFB8FFFF).copy(alpha = 0.98f * exitVisibility),
+                start = rightPost,
+                end = Offset(rightPost.x, postBottomY),
+                strokeWidth = cell * 0.045f,
+                cap = StrokeCap.Round,
             )
         }
 
