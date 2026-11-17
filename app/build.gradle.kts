@@ -55,6 +55,14 @@ dependencies {
     implementation(project(":core:storage"))
     implementation(project(":games:grid-hunter"))
 
+    // Isolated libGDX prototype host; Compose remains the production launcher.
+    implementation("com.badlogicgames.gdx:gdx:1.13.1")
+    implementation("com.badlogicgames.gdx:gdx-backend-android:1.13.1")
+    runtimeOnly("com.badlogicgames.gdx:gdx-platform:1.13.1:natives-arm64-v8a")
+    runtimeOnly("com.badlogicgames.gdx:gdx-platform:1.13.1:natives-armeabi-v7a")
+    runtimeOnly("com.badlogicgames.gdx:gdx-platform:1.13.1:natives-x86")
+    runtimeOnly("com.badlogicgames.gdx:gdx-platform:1.13.1:natives-x86_64")
+
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.ui.graphics)
