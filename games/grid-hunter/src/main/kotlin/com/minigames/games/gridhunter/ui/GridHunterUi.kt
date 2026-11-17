@@ -390,7 +390,12 @@ fun GridHunterBoardCanvas(
             val gateRadius = cell * 0.31f
             val gateBounds = Offset(exitCenter.x - gateRadius, exitCenter.y - gateRadius)
 
-            // A single stationary neon arch: no vortex, rings or particles.
+            // A stationary neon doorway: rounded arch with two straight side posts.
+            val leftPost = Offset(exitCenter.x - gateRadius, exitCenter.y)
+            val rightPost = Offset(exitCenter.x + gateRadius, exitCenter.y)
+            val postBottomY = exitCenter.y + cell * 0.46f
+
+            // Soft outer neon edge.
             drawArc(
                 color = Color(0xFF00F5FF).copy(alpha = 0.28f * exitVisibility),
                 startAngle = 180f,
@@ -400,6 +405,22 @@ fun GridHunterBoardCanvas(
                 size = Size(gateRadius * 2f, gateRadius * 2f),
                 style = Stroke(width = cell * 0.14f, cap = StrokeCap.Round),
             )
+            drawLine(
+                color = Color(0xFF00F5FF).copy(alpha = 0.28f * exitVisibility),
+                start = leftPost,
+                end = Offset(leftPost.x, postBottomY),
+                strokeWidth = cell * 0.14f,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = Color(0xFF00F5FF).copy(alpha = 0.28f * exitVisibility),
+                start = rightPost,
+                end = Offset(rightPost.x, postBottomY),
+                strokeWidth = cell * 0.14f,
+                cap = StrokeCap.Round,
+            )
+
+            // Bright inner neon core.
             drawArc(
                 color = Color(0xFFB8FFFF).copy(alpha = 0.98f * exitVisibility),
                 startAngle = 180f,
@@ -408,6 +429,20 @@ fun GridHunterBoardCanvas(
                 topLeft = gateBounds,
                 size = Size(gateRadius * 2f, gateRadius * 2f),
                 style = Stroke(width = cell * 0.045f, cap = StrokeCap.Round),
+            )
+            drawLine(
+                color = Color(0xFFB8FFFF).copy(alpha = 0.98f * exitVisibility),
+                start = leftPost,
+                end = Offset(leftPost.x, postBottomY),
+                strokeWidth = cell * 0.045f,
+                cap = StrokeCap.Round,
+            )
+            drawLine(
+                color = Color(0xFFB8FFFF).copy(alpha = 0.98f * exitVisibility),
+                start = rightPost,
+                end = Offset(rightPost.x, postBottomY),
+                strokeWidth = cell * 0.045f,
+                cap = StrokeCap.Round,
             )
         }
 
