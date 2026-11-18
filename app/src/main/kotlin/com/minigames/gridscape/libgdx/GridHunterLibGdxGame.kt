@@ -66,6 +66,14 @@ private class GridHunterPrototypeScreen(
         scope.launch {
             session.state.collect { state = it }
         }
+        // Keep simulation cadence independent from libGDX rendering frame rate,
+        // matching the Compose host's dedicated 16 ms clock loop.
+        scope.launch {
+            while (kotlin.coroutines.coroutineContext.isActive) {
+                session.stepClock()
+                kotlinx.coroutines.delay(16L)
+            }
+        }
         Gdx.input.inputProcessor = object : InputAdapter() {
             override fun touchDown(screenX: Int, screenY: Int, pointer: Int, button: Int): Boolean {
                 touchStartX = screenX.toFloat()
@@ -109,7 +117,6 @@ private class GridHunterPrototypeScreen(
     }
 
     override fun render(delta: Float) {
-        session.stepClock()
         val snapshot = state ?: return
         Gdx.gl.glClearColor(background.r, background.g, background.b, 1f)
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT)
