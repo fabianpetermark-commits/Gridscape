@@ -186,10 +186,10 @@ private class GridHunterPrototypeScreen(
             else -> "GRID HUNTER"
         }
         font.draw(batch, hint, 20f, boardBottom - 28f)
+        batch.end()
         if (snapshot.phase == GamePhase.PLAYING) {
             drawButtonLabel("Ⅱ  PAUSE", pauseButtonBounds(), cyan)
         }
-        batch.end()
 
         if (snapshot.phase == GamePhase.PAUSED ||
             snapshot.phase == GamePhase.GAME_OVER ||
@@ -232,10 +232,16 @@ private class GridHunterPrototypeScreen(
         shapes.color = color.cpy().also { it.a = 0.18f }
         shapes.rect(bounds.x, bounds.y, bounds.width, bounds.height)
         shapes.end()
+        shapes.color = color
+        shapes.rect(bounds.x, bounds.y, bounds.width, bounds.height)
+        shapes.end()
+        batch.projectionMatrix = camera.combined
+        batch.begin()
         font.color = color
         font.data.setScale(1f)
         font.draw(batch, label, bounds.x + 18f, bounds.y + 27f)
         font.color = Color.WHITE
+        batch.end()
     }
 
     private fun drawPhaseOverlay(phase: GamePhase, width: Float, height: Float) {
