@@ -73,3 +73,25 @@ This is an incremental migration. The current Jetpack Compose implementation rem
 ## Current status
 
 Branch created from `main` for the isolated prototype. The clock audit found that libGDX was calling `stepClock()` from `render()`, unlike Compose's dedicated 16 ms loop. This was corrected: libGDX now runs a dedicated 16 ms clock coroutine, separate from rendering. No gameplay logic or production rendering has been changed.
+
+
+## Lifecycle parity audit (follow-up)
+
+The Compose and libGDX hosts were compared directly:
+
+- Both use the same `GameSession.onHostBackgrounded()` behavior, which pauses a PLAYING session.
+- Both call `onHostForegrounded()` to reset the clock timestamp on return; neither automatically resumes a PAUSED game.
+- Both use a dedicated 16 ms clock coroutine and do not tie simulation time to rendering.
+- The libGDX tap action resumes from PAUSED, matching the Compose overlay's Resume action.
+- Because `stepClock()` clears its timestamp whenever the session is not PLAYING, background time cannot accumulate into a catch-up burst.
+
+No lifecycle code change was needed in this audit.
+
+### Remaining parity gaps identified (not changed)
+
+- The libGDX prototype has no explicit pause button; Compose does. Android backgrounding still pauses correctly.
+- The prototype's PAUSED and GAME_OVER/Victory interaction is tap-based and visually minimal; Compose uses explicit overlay actions.
+- The prototype has no dedicated victory overlay, although the state/hint reports victory and tap resets.
+- The isolated Activity currently starts with EASY hardcoded. It is not yet wired to the production difficulty-selection/navigation flow.
+
+These are prototype/UI integration gaps, not gameplay-rule changes. Device testing remains required.
