@@ -11,7 +11,7 @@ This is an incremental migration. The current Jetpack Compose implementation rem
 - `:core:models` contains shared value types such as `GridPoint`, `Direction`, `Difficulty`, and `GamePhase`.
 - `:core:engine` exposes the generic `GameEngine<S, C, Config>` contract and `GameSession`. The session owns the immutable state as a `StateFlow`, accepts commands, advances the simulation through `stepClock()`, and supports pause/resume/reset.
 - `:games:grid-hunter` contains `GridHunterEngine`, `GridHunterState`, `GridHunterCommand`, AI, pathfinding, level generation, and difficulty configuration.
-- The existing Compose screen currently owns the session lifecycle, 16 ms clock loop, lifecycle pause/resume handling, HUD, overlays, touch/swipe controls, and board rendering.
+- The existing Compose screen owns a dedicated 16 ms clock loop; the libGDX prototype now mirrors this with its own coroutine, independent of render frame rate.
 - `:core:rendering` is currently Compose-specific and should not become a dependency of the libGDX renderer.
 
 ## Non-negotiable parity rules
@@ -72,4 +72,4 @@ This is an incremental migration. The current Jetpack Compose implementation rem
 
 ## Current status
 
-Branch created from `main` for the isolated prototype. No gameplay logic or production rendering has been changed.
+Branch created from `main` for the isolated prototype. The clock audit found that libGDX was calling `stepClock()` from `render()`, unlike Compose's dedicated 16 ms loop. This was corrected: libGDX now runs a dedicated 16 ms clock coroutine, separate from rendering. No gameplay logic or production rendering has been changed.
