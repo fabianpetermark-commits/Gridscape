@@ -232,9 +232,6 @@ private class GridHunterPrototypeScreen(
         shapes.color = color.cpy().also { it.a = 0.18f }
         shapes.rect(bounds.x, bounds.y, bounds.width, bounds.height)
         shapes.end()
-        shapes.color = color
-        shapes.rect(bounds.x, bounds.y, bounds.width, bounds.height)
-        shapes.end()
         batch.projectionMatrix = camera.combined
         batch.begin()
         font.color = color
