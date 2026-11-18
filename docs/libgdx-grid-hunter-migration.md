@@ -95,3 +95,9 @@ No lifecycle code change was needed in this audit.
 - The isolated Activity currently starts with EASY hardcoded. It is not yet wired to the production difficulty-selection/navigation flow.
 
 These are prototype/UI integration gaps, not gameplay-rule changes. Device testing remains required.
+
+## Explicit pause and phase overlays
+
+The isolated libGDX host now has an on-screen Pause control while PLAYING. PAUSED displays explicit Resume and Restart hit targets; GAME_OVER and VICTORY display distinct status panels with a Play Again target. UI taps are checked before board gestures, so tapping a control cannot become a movement command. All actions call the existing `GameSession` methods and preserve the shared engine/state model. The overlay work does not change enemy behavior, movement, difficulty, or level generation.
+
+The prototype intentionally does not expose a Main Menu action because it is still an isolated Activity and is not connected to production navigation. Device-level touch/layout verification remains outstanding.
