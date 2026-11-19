@@ -104,8 +104,13 @@ The prototype intentionally does not expose a Main Menu action because it is sti
 
 ### Return navigation in the isolated host
 
-The pause, game-over, and victory overlays now expose a Main Menu action. Because this prototype remains a separately launched Android Activity, the action finishes that Activity and returns to its caller; it does not introduce a production navigation dependency or change the Compose launcher. The Activity still uses EASY as a temporary prototype default until difficulty selection is wired deliberately.
+The pause, game-over, and victory overlays now expose a Main Menu action. Because this prototype remains a separately launched Android Activity, the action finishes that Activity and returns to its caller; it does not introduce a production navigation dependency or change the Compose launcher. The Activity uses EASY only when it is launched without a valid difficulty extra.
 
 ### Difficulty handoff contract
 
 The isolated Activity now accepts the selected difficulty through `GridHunterLibGdxActivity.createIntent(context, difficulty)`. The value is serialized by enum name and validated on receipt; missing or unknown values fall back to EASY. This establishes a typed launch contract for a future app-shell integration without changing the current Compose production route or launcher. The prototype remains independently launchable for isolated testing.
+
+
+### Internal prototype test entry
+
+The Compose difficulty-selection screen now exposes a small **LIBGDX TEST** action on each individual difficulty card. It launches the isolated Activity with that card's exact difficulty through the typed intent helper. The normal card tap still launches the existing Compose game, and progressive mode remains Compose-only. This is a deliberate test entry point, not a production renderer switch; the Compose launcher and gameplay route remain the default. The Activity is registered as non-exported, so it can only be launched from inside the app. Device verification of the actual handoff and play session is still required.
