@@ -101,3 +101,7 @@ These are prototype/UI integration gaps, not gameplay-rule changes. Device testi
 The isolated libGDX host now has an on-screen Pause control while PLAYING. PAUSED displays explicit Resume and Restart hit targets; GAME_OVER and VICTORY display distinct status panels with a Play Again target. UI taps are checked before board gestures, so tapping a control cannot become a movement command. All actions call the existing `GameSession` methods and preserve the shared engine/state model. The overlay work does not change enemy behavior, movement, difficulty, or level generation.
 
 The prototype intentionally does not expose a Main Menu action because it is still an isolated Activity and is not connected to production navigation. Device-level touch/layout verification remains outstanding.
+
+### Return navigation in the isolated host
+
+The pause, game-over, and victory overlays now expose a Main Menu action. Because this prototype remains a separately launched Android Activity, the action finishes that Activity and returns to its caller; it does not introduce a production navigation dependency or change the Compose launcher. The Activity still uses EASY as a temporary prototype default until difficulty selection is wired deliberately.
