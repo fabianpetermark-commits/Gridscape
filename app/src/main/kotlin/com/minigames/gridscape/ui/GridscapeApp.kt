@@ -384,7 +384,7 @@ private fun DifficultySelectScreen(
                             border = BorderStroke(1.2.dp, accent.copy(alpha = 0.9f)),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(158.dp)
+                                .height(184.dp)
                                 .clickable { onStartDifficulty(difficulty) },
                         ) {
                             Column(
