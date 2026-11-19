@@ -16,6 +16,6 @@ class GridHunterLibGdxActivity : AndroidApplication() {
             useImmersiveMode = true
             useWakelock = true
         }
-        initialize(GridHunterLibGdxGame(Difficulty.EASY), config)
+        initialize(GridHunterLibGdxGame(Difficulty.EASY) { finish() }, config)
     }
 }
