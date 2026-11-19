@@ -30,14 +30,16 @@ import kotlinx.coroutines.isActive
 
 class GridHunterLibGdxGame(
     private val difficulty: Difficulty,
+    private val onExit: () -> Unit,
 ) : Game() {
     override fun create() {
-        setScreen(GridHunterPrototypeScreen(difficulty))
+        setScreen(GridHunterPrototypeScreen(difficulty, onExit))
     }
 }
 
 private class GridHunterPrototypeScreen(
     difficulty: Difficulty,
+    private val onExit: () -> Unit,
 ) : ScreenAdapter() {
     private val session = GameSession(
         engine = GridHunterEngine(),
@@ -104,12 +106,15 @@ private class GridHunterPrototypeScreen(
                             isInside(screenX.toFloat(), worldY, primaryButtonBounds()) -> session.resume()
                             isInside(screenX.toFloat(), worldY, secondaryButtonBounds()) ->
                                 session.reset(GridHunterConfig.forDifficulty(difficulty))
+                            isInside(screenX.toFloat(), worldY, tertiaryButtonBounds()) -> onExit()
                         }
                         return true
                     }
                     if (snapshot.phase == GamePhase.GAME_OVER || snapshot.phase == GamePhase.VICTORY) {
-                        if (isInside(screenX.toFloat(), worldY, primaryButtonBounds())) {
-                            session.reset(GridHunterConfig.forDifficulty(difficulty))
+                        when {
+                            isInside(screenX.toFloat(), worldY, primaryButtonBounds()) ->
+                                session.reset(GridHunterConfig.forDifficulty(difficulty))
+                            isInside(screenX.toFloat(), worldY, secondaryButtonBounds()) -> onExit()
                         }
                         return true
                     }
@@ -210,14 +215,21 @@ private class GridHunterPrototypeScreen(
 
     private fun primaryButtonBounds() = UiBounds(
         x = Gdx.graphics.width / 2f - 92f,
-        y = Gdx.graphics.height / 2f - 12f,
+        y = Gdx.graphics.height / 2f + 36f,
         width = 184f,
         height = 44f,
     )
 
     private fun secondaryButtonBounds() = UiBounds(
         x = Gdx.graphics.width / 2f - 92f,
-        y = Gdx.graphics.height / 2f - 68f,
+        y = Gdx.graphics.height / 2f - 20f,
+        width = 184f,
+        height = 44f,
+    )
+
+    private fun tertiaryButtonBounds() = UiBounds(
+        x = Gdx.graphics.width / 2f - 92f,
+        y = Gdx.graphics.height / 2f - 76f,
         width = 184f,
         height = 44f,
     )
@@ -243,7 +255,7 @@ private class GridHunterPrototypeScreen(
 
     private fun drawPhaseOverlay(phase: GamePhase, width: Float, height: Float) {
         val panelWidth = minOf(width - 40f, 300f)
-        val panelHeight = if (phase == GamePhase.PAUSED) 196f else 142f
+        val panelHeight = if (phase == GamePhase.PAUSED) 252f else 196f
         val panelX = (width - panelWidth) / 2f
         val panelY = (height - panelHeight) / 2f
         shapes.projectionMatrix = camera.combined
@@ -289,6 +301,9 @@ private class GridHunterPrototypeScreen(
         )
         if (phase == GamePhase.PAUSED) {
             drawButtonLabel("↻  RESTART", secondaryButtonBounds(), amber)
+            drawButtonLabel("MAIN MENU", tertiaryButtonBounds(), Color.WHITE)
+        } else {
+            drawButtonLabel("MAIN MENU", secondaryButtonBounds(), Color.WHITE)
         }
     }
 
