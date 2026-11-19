@@ -105,3 +105,7 @@ The prototype intentionally does not expose a Main Menu action because it is sti
 ### Return navigation in the isolated host
 
 The pause, game-over, and victory overlays now expose a Main Menu action. Because this prototype remains a separately launched Android Activity, the action finishes that Activity and returns to its caller; it does not introduce a production navigation dependency or change the Compose launcher. The Activity still uses EASY as a temporary prototype default until difficulty selection is wired deliberately.
+
+### Difficulty handoff contract
+
+The isolated Activity now accepts the selected difficulty through `GridHunterLibGdxActivity.createIntent(context, difficulty)`. The value is serialized by enum name and validated on receipt; missing or unknown values fall back to EASY. This establishes a typed launch contract for a future app-shell integration without changing the current Compose production route or launcher. The prototype remains independently launchable for isolated testing.
