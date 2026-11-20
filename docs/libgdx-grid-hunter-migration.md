@@ -114,3 +114,60 @@ The isolated Activity now accepts the selected difficulty through `GridHunterLib
 ### Internal prototype test entry
 
 The Compose difficulty-selection screen now exposes a small **LIBGDX TEST** action on each individual difficulty card. It launches the isolated Activity with that card's exact difficulty through the typed intent helper. The normal card tap still launches the existing Compose game, and progressive mode remains Compose-only. This is a deliberate test entry point, not a production renderer switch; the Compose launcher and gameplay route remain the default. The Activity is registered as non-exported, so it can only be launched from inside the app. Device verification of the actual handoff and play session is still required.
+
+---
+
+## Crash fix audit — 2026-11-20
+
+### Root cause (confirmed by static analysis)
+
+`GridHunterPrototypeScreen` declared `ShapeRenderer`, `SpriteBatch`, `BitmapFont`, and
+`OrthographicCamera` as class-level `val` properties. In Kotlin, class-level `val` properties
+are initialised inside the class initialiser block (`init {}`). This runs synchronously during
+the `GridHunterPrototypeScreen` constructor call, which is triggered by `setScreen()` inside
+`GridHunterLibGdxGame.create()`. At this point in the libGDX lifecycle the OpenGL context has
+**not** yet been established; calling the `ShapeRenderer()`, `SpriteBatch()`, or `BitmapFont()`
+constructors without a live GL context causes an immediate native crash — the first OpenGL call
+into the driver returns without a valid surface, corrupting the rendering state and crashing the
+process.
+
+A secondary contributor: the coroutine scope used `Dispatchers.Main.immediate`. On the libGDX
+render thread this dispatcher requires an Android `Looper`, which is not guaranteed to be
+available. The `inputProcessor` was also set inside `init {}` before `Gdx.input` was ready.
+
+### Changes made
+
+| File | Change |
+|---|---|
+| `GridHunterLibGdxGame.kt` | GL objects (`ShapeRenderer`, `SpriteBatch`, `BitmapFont`, `OrthographicCamera`) promoted to `lateinit var`; created in `show()` where GL context is guaranteed. `inputProcessor` moved from `init {}` to `show()`. Coroutine scope moved to `show()` / cancelled in `hide()` and `dispose()`. Dispatcher changed from `Dispatchers.Main.immediate` to `Dispatchers.Default`; state updates posted back to the GL thread via `Gdx.app.postRunnable`. `dispose()` guards each GL object with `isInitialized`. Logcat logging added with `GridHunterLibGdx` TAG. |
+| `AndroidManifest.xml` | `GridHunterLibGdxActivity` given `android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"` (required by the libGDX Android backend for correct `GLSurfaceView` setup). Added `android:configChanges` for orientation, keyboard, and density — libGDX handles these internally. |
+| `GridHunterLibGdxActivity.kt` | `Difficulty.values()` → `Difficulty.entries`. Lifecycle Logcat logging added. |
+| `app/build.gradle.kts` | JUnit 5 unit test support added (`testOptions`, `testImplementation`, `testRuntimeOnly`). |
+| `app/src/test/…/GridHunterIntentContractTest.kt` | New JVM unit test covering the difficulty intent serialisation contract (all four values round-trip, null/unknown/empty/lowercase fall back to EASY, constant guard). |
+
+### Classification of each issue
+
+| Issue | Classification |
+|---|---|
+| GL objects created before GL context | **Confirmed crash cause** — static analysis, libGDX lifecycle documentation |
+| Theme incompatibility | **Strong technical suspicion** — well-documented libGDX requirement; cannot confirm without device log |
+| `inputProcessor` in `init {}` | **Strong technical suspicion** — `Gdx.input` not guaranteed ready at that point |
+| `Dispatchers.Main.immediate` | **Strong technical suspicion** — requires Android Looper, absent on libGDX render thread |
+| `Difficulty.values()` deprecation | **Minor / confirmed** — Kotlin API; replaced with `Difficulty.entries` |
+
+### What still requires a real device to verify
+
+- That the Activity starts and the board renders without further errors.
+- That touch input (swipe and tap) correctly controls the game.
+- That Android lifecycle (home button → reopen, rotation lock, back button) behaves correctly.
+- That `Gdx.app.postRunnable` state updates do not introduce frame stutter at 60 fps.
+- That the Theme.Black.NoTitleBar.Fullscreen theme does not cause a visual regression
+  (status bar, navigation bar, edge-to-edge layout) compared with the Compose MainActivity.
+
+### No-change guarantees
+
+- `GridHunterEngine`, `GridHunterState`, AI, pathfinding, level generation — untouched.
+- All four difficulty configurations — untouched.
+- Compose `MainActivity` and `GridHunterScreen` — untouched.
+- Progressive mode — untouched.
+- Existing `GridHunterEngineTest` suite — untouched and unaffected.
