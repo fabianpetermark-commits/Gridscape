@@ -8,10 +8,20 @@
         android:label="Gridscape"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.NoActionBar">
+        <!--
+            GridHunterLibGdxActivity must use Theme.Black.NoTitleBar.Fullscreen (or equivalent).
+            The libGDX Android backend requires a fullscreen/no-title-bar theme to correctly
+            initialise its GLSurfaceView. Inheriting the app-level Theme.Material.NoActionBar
+            theme causes a crash on many devices when the backend attempts to set up the GL
+            context. configChanges are added so Android does not recreate the Activity on
+            orientation/keyboard/density changes — libGDX handles these internally.
+        -->
         <activity
             android:name=".libgdx.GridHunterLibGdxActivity"
             android:exported="false"
-            android:screenOrientation="portrait" />
+            android:screenOrientation="portrait"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen"
+            android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
