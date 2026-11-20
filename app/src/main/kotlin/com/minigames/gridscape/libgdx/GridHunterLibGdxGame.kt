@@ -1,5 +1,6 @@
 package com.minigames.gridscape.libgdx
 
+import android.util.Log
 import com.badlogic.gdx.Game
 import com.badlogic.gdx.Gdx
 import com.badlogic.gdx.InputAdapter
@@ -24,16 +25,24 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+
+private const val TAG = "GridHunterLibGdx"
 
 class GridHunterLibGdxGame(
     private val difficulty: Difficulty,
     private val onExit: () -> Unit,
 ) : Game() {
+
     override fun create() {
+        Log.d(TAG, "Game.create() — GL context is now available")
         setScreen(GridHunterPrototypeScreen(difficulty, onExit))
+    }
+
+    override fun dispose() {
+        Log.d(TAG, "Game.dispose()")
+        super.dispose()
     }
 }
 
@@ -41,17 +50,33 @@ private class GridHunterPrototypeScreen(
     difficulty: Difficulty,
     private val onExit: () -> Unit,
 ) : ScreenAdapter() {
+
+    // -------------------------------------------------------------------------
+    // Game state — read on the render thread, written by coroutines via
+    // Gdx.app.postRunnable so all mutations happen on the GL thread.
+    // -------------------------------------------------------------------------
     private val session = GameSession(
         engine = GridHunterEngine(),
         initialConfig = GridHunterConfig.forDifficulty(difficulty),
     )
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var state: GridHunterState? = session.state.value
 
-    private val camera = OrthographicCamera()
-    private val shapes = ShapeRenderer()
-    private val batch = SpriteBatch()
-    private val font = BitmapFont()
+    // Coroutine scope is created in show() and cancelled in hide()/dispose().
+    // Using Dispatchers.Default keeps coroutines off the GL thread; state
+    // mutations are posted back via Gdx.app.postRunnable.
+    private var scope: CoroutineScope? = null
+
+    // -------------------------------------------------------------------------
+    // GL resources — MUST be created in show() after the GL context is ready.
+    // Creating them as class-level properties or in init {} causes an immediate
+    // crash because OpenGL is not yet initialised at that point.
+    // -------------------------------------------------------------------------
+    private lateinit var camera: OrthographicCamera
+    private lateinit var shapes: ShapeRenderer
+    private lateinit var batch: SpriteBatch
+    private lateinit var font: BitmapFont
+
+    // Colours are plain data; they are safe to create here.
     private val background = Color(0.035f, 0.047f, 0.078f, 1f)
     private val gridLine = Color(0.12f, 0.17f, 0.25f, 1f)
     private val cyan = Color(0f, 0.96f, 1f, 1f)
@@ -59,24 +84,50 @@ private class GridHunterPrototypeScreen(
     private val red = Color(1f, 0.16f, 0.37f, 1f)
     private val amber = Color(1f, 0.57f, 0f, 1f)
     private val obstacle = Color(0.19f, 0.25f, 0.36f, 1f)
+
     private var boardLeft = 0f
     private var boardBottom = 0f
     private var cell = 0f
     private var touchStartX = 0f
     private var touchStartY = 0f
 
-    init {
-        scope.launch {
-            session.state.collect { state = it }
+    // -------------------------------------------------------------------------
+    // show() — called by libGDX once the GL context is ready.
+    // All GL object creation and input processor registration happen here.
+    // -------------------------------------------------------------------------
+    override fun show() {
+        Log.d(TAG, "show() — creating GL resources and starting coroutines")
+
+        // Create GL resources only now that the context is guaranteed to be ready.
+        camera = OrthographicCamera()
+        shapes = ShapeRenderer()
+        batch = SpriteBatch()
+        font = BitmapFont()
+
+        // Start coroutines that keep the state snapshot current and drive the
+        // simulation clock. Using Dispatchers.Default to stay off the GL thread;
+        // writes back to 'state' via Gdx.app.postRunnable so they are safely
+        // consumed on the render thread.
+        val newScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        scope = newScope
+
+        newScope.launch {
+            session.state.collect { newState ->
+                // Post state update to the GL/render thread.
+                Gdx.app.postRunnable { state = newState }
+            }
         }
-        // Keep simulation cadence independent from libGDX rendering frame rate,
-        // matching the Compose host's dedicated 16 ms clock loop.
-        scope.launch {
-            while (kotlin.coroutines.coroutineContext.isActive) {
+
+        // Dedicated 16 ms simulation clock — matches the Compose host's loop cadence.
+        newScope.launch {
+            while (isActive) {
                 session.stepClock()
                 kotlinx.coroutines.delay(16L)
             }
         }
+
+        // Register the input processor here, not in init{}, because Gdx.input
+        // is only guaranteed to be valid after show() is called.
         Gdx.input.inputProcessor = object : InputAdapter() {
             override fun touchDown(screenX: Int, screenY: Int, pointer: Int, button: Int): Boolean {
                 touchStartX = screenX.toFloat()
@@ -138,6 +189,9 @@ private class GridHunterPrototypeScreen(
         }
     }
 
+    // -------------------------------------------------------------------------
+    // render() — called on the GL thread; all GL objects are ready.
+    // -------------------------------------------------------------------------
     override fun render(delta: Float) {
         val snapshot = state ?: return
         Gdx.gl.glClearColor(background.r, background.g, background.b, 1f)
@@ -315,19 +369,36 @@ private class GridHunterPrototypeScreen(
         shapes.rect(x, y, cell - inset * 2f, cell - inset * 2f)
     }
 
+    // -------------------------------------------------------------------------
+    // Lifecycle
+    // -------------------------------------------------------------------------
+
     override fun pause() {
+        Log.d(TAG, "ScreenAdapter.pause() — backgrounding session")
         session.onHostBackgrounded()
     }
 
     override fun resume() {
+        Log.d(TAG, "ScreenAdapter.resume() — foregrounding session")
         session.onHostForegrounded()
     }
 
-    override fun dispose() {
+    override fun hide() {
+        Log.d(TAG, "hide() — cancelling coroutine scope and clearing input processor")
+        scope?.cancel()
+        scope = null
         Gdx.input.inputProcessor = null
-        scope.cancel()
-        shapes.dispose()
-        batch.dispose()
-        font.dispose()
+    }
+
+    override fun dispose() {
+        Log.d(TAG, "dispose() — releasing GL resources")
+        // hide() is always called before dispose() by the libGDX screen lifecycle,
+        // but cancel scope defensively in case dispose() is called directly.
+        scope?.cancel()
+        scope = null
+        Gdx.input.inputProcessor = null
+        if (::shapes.isInitialized) shapes.dispose()
+        if (::batch.isInitialized) batch.dispose()
+        if (::font.isInitialized) font.dispose()
     }
 }
