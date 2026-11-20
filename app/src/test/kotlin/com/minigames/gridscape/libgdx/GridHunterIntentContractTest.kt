@@ -105,7 +105,7 @@ class GridHunterIntentContractTest {
     fun `EXTRA_DIFFICULTY constant has the expected fully-qualified value`() {
         assertEquals(
             "com.minigames.gridscape.extra.GRID_HUNTER_DIFFICULTY",
-            GridHunterLibGdxActivity.EXTRA_DIFFICULTY,
+            GridHunterLibGdxContract.EXTRA_DIFFICULTY,
         )
     }
 }
