@@ -47,7 +47,7 @@ class GridHunterLibGdxGame(
 }
 
 private class GridHunterPrototypeScreen(
-    difficulty: Difficulty,
+    private val difficulty: Difficulty,
     private val onExit: () -> Unit,
 ) : ScreenAdapter() {
 
