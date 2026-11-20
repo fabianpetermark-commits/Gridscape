@@ -19,12 +19,11 @@ import com.minigames.core.models.Difficulty
 class GridHunterLibGdxActivity : AndroidApplication() {
 
     companion object {
-        const val EXTRA_DIFFICULTY = "com.minigames.gridscape.extra.GRID_HUNTER_DIFFICULTY"
         private const val TAG = "GridHunterLibGdx"
 
         fun createIntent(context: Context, difficulty: Difficulty): Intent =
             Intent(context, GridHunterLibGdxActivity::class.java)
-                .putExtra(EXTRA_DIFFICULTY, difficulty.name)
+                .putExtra(GridHunterLibGdxContract.EXTRA_DIFFICULTY, difficulty.name)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -35,7 +34,7 @@ class GridHunterLibGdxActivity : AndroidApplication() {
             useWakelock = true
         }
         // Difficulty.entries replaces the deprecated Difficulty.values()
-        val difficulty = intent.getStringExtra(EXTRA_DIFFICULTY)
+        val difficulty = intent.getStringExtra(GridHunterLibGdxContract.EXTRA_DIFFICULTY)
             ?.let { requested -> Difficulty.entries.firstOrNull { it.name == requested } }
             ?: Difficulty.EASY
         Log.d(TAG, "Starting GridHunterLibGdxGame with difficulty=$difficulty")
