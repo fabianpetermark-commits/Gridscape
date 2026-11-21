@@ -151,6 +151,7 @@ fun GridscapeApp(
                         route = AppRoute.Playing(difficulty)
                     },
                     onStartLibGdxPrototype = { difficulty ->
+                        DiagnosticLog.info("LIBGDX TEST tapped; difficulty=$difficulty")
                         context.startActivity(GridHunterLibGdxActivity.createIntent(context, difficulty))
                     },
                     onStartProgressive = {
