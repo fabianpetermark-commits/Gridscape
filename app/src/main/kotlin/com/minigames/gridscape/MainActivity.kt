@@ -13,16 +13,20 @@ import androidx.compose.ui.Modifier
 import com.minigames.core.rendering.LocalMiniGamesColors
 import com.minigames.core.rendering.MiniGamesTheme
 import com.minigames.core.storage.MiniGamesStorage
+import com.minigames.gridscape.diagnostics.DiagnosticLog
 import com.minigames.gridscape.ui.GridscapeApp
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        DiagnosticLog.install(applicationContext)
+        DiagnosticLog.info("MainActivity.onCreate")
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
             navigationBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
         )
 
+        DiagnosticLog.info("MainActivity.setContent")
         setContent {
             val storage = remember { MiniGamesStorage.create(applicationContext) }
             MiniGamesTheme {
