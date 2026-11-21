@@ -17,6 +17,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -37,6 +39,7 @@ import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +53,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import android.app.Activity
 import android.content.Context
 import android.content.ContextWrapper
@@ -64,6 +69,7 @@ import com.minigames.core.storage.MiniGamesStorage
 import com.minigames.core.storage.UserSettings
 import com.minigames.games.gridhunter.logic.GridHunterMeta
 import com.minigames.gridscape.libgdx.GridHunterLibGdxActivity
+import com.minigames.gridscape.diagnostics.DiagnosticLog
 import com.minigames.games.gridhunter.ui.GridHunterScreen
 import java.util.Locale
 import kotlinx.coroutines.launch
@@ -71,6 +77,7 @@ import kotlinx.coroutines.launch
 private sealed interface AppRoute {
     data object MainMenu : AppRoute
     data object Settings : AppRoute
+    data object Diagnostics : AppRoute
     data object DifficultySelect : AppRoute
     data class Playing(val difficulty: Difficulty, val progressiveMode: Boolean = false) : AppRoute
 }
@@ -94,7 +101,7 @@ fun GridscapeApp(
     BackHandler(enabled = route != AppRoute.MainMenu) {
         route = when (route) {
             AppRoute.MainMenu -> AppRoute.MainMenu
-            AppRoute.Settings, AppRoute.DifficultySelect -> AppRoute.MainMenu
+            AppRoute.Settings, AppRoute.Diagnostics, AppRoute.DifficultySelect -> AppRoute.MainMenu
             is AppRoute.Playing -> AppRoute.DifficultySelect
         }
     }
@@ -110,6 +117,7 @@ fun GridscapeApp(
                 MainMenuScreen(
                     onStart = { route = AppRoute.DifficultySelect },
                     onOpenSettings = { route = AppRoute.Settings },
+                    onOpenDiagnostics = { route = AppRoute.Diagnostics },
                     onExit = { context.findActivity()?.finish() },
                 )
             }
@@ -128,6 +136,10 @@ fun GridscapeApp(
                     },
                     onBack = { route = AppRoute.MainMenu },
                 )
+            }
+
+            AppRoute.Diagnostics -> {
+                DiagnosticsScreen(onBack = { route = AppRoute.MainMenu })
             }
 
             AppRoute.DifficultySelect -> {
@@ -181,6 +193,7 @@ fun GridscapeApp(
 private fun MainMenuScreen(
     onStart: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenDiagnostics: () -> Unit,
     onExit: () -> Unit,
 ) {
     val colors = LocalMiniGamesColors.current
@@ -247,6 +260,10 @@ private fun MainMenuScreen(
 
         Spacer(modifier = Modifier.height(14.dp))
 
+        TextButton(onClick = onOpenDiagnostics) {
+            Text("DIAGNOSTIKA / HIBANAPLÓ", color = colors.playerCyan, fontWeight = FontWeight.SemiBold)
+        }
+
         TextButton(onClick = onExit) {
             Text(
                 text = "KILÉPÉS",
@@ -255,6 +272,70 @@ private fun MainMenuScreen(
                 letterSpacing = 1.2.sp,
             )
         }
+    }
+}
+
+
+@Composable
+private fun DiagnosticsScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    val clipboard = LocalClipboardManager.current
+    val colors = LocalMiniGamesColors.current
+    var logText by remember { mutableStateOf(DiagnosticLog.read(context)) }
+
+    LaunchedEffect(Unit) {
+        logText = DiagnosticLog.read(context)
+        DiagnosticLog.info("Diagnostics screen opened")
+        logText = DiagnosticLog.read(context)
+    }
+
+    Column(
+        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+            IconButton(onClick = onBack) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Vissza", tint = colors.textPrimary)
+            }
+            Text("DIAGNOSZTIKA", color = colors.playerCyan, fontSize = 18.sp, fontWeight = FontWeight.Bold)
+        }
+        Text(
+            "A napló az alkalmazásban marad. Indítsd el innen a LIBGDX TEST módot, majd ha visszalép vagy összeomlik, nyisd meg újra ezt az oldalt.",
+            color = colors.textSecondary,
+            fontSize = 12.sp,
+        )
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(onClick = {
+                logText = DiagnosticLog.read(context)
+                clipboard.setText(AnnotatedString(logText))
+            }) { Text("NAPLÓ MÁSOLÁSA") }
+            OutlinedButton(onClick = {
+                DiagnosticLog.clear(context)
+                DiagnosticLog.info("Log cleared; ready for next reproduction")
+                logText = DiagnosticLog.read(context)
+            }) { Text("TÖRLÉS") }
+        }
+        Text("Naplófájl: belső alkalmazástárhely · ${logText.length} karakter", color = colors.textSecondary, fontSize = 10.sp)
+        Surface(
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+            color = colors.surface,
+            shape = RoundedCornerShape(12.dp),
+            border = BorderStroke(1.dp, colors.boardOuterBorder),
+        ) {
+            SelectionContainer {
+                Text(
+                    text = logText,
+                    modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+                    color = colors.textPrimary,
+                    fontSize = 10.sp,
+                    lineHeight = 13.sp,
+                    fontFamily = FontFamily.Monospace,
+                )
+            }
+        }
+        OutlinedButton(onClick = {
+            logText = DiagnosticLog.read(context)
+        }, modifier = Modifier.fillMaxWidth()) { Text("FRISSÍTÉS") }
     }
 }
 
