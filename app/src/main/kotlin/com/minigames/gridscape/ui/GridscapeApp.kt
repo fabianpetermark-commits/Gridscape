@@ -63,6 +63,7 @@ import com.minigames.core.rendering.LocalMiniGamesColors
 import com.minigames.core.storage.MiniGamesStorage
 import com.minigames.core.storage.UserSettings
 import com.minigames.games.gridhunter.logic.GridHunterMeta
+import com.minigames.gridscape.libgdx.GridHunterLibGdxActivity
 import com.minigames.games.gridhunter.ui.GridHunterScreen
 import java.util.Locale
 import kotlinx.coroutines.launch
@@ -135,6 +136,9 @@ fun GridscapeApp(
                     statsByDifficulty = gridHunterStats,
                     onStartDifficulty = { difficulty ->
                         route = AppRoute.Playing(difficulty)
+                    },
+                    onStartLibGdxPrototype = { difficulty ->
+                        context.startActivity(GridHunterLibGdxActivity.createIntent(context, difficulty))
                     },
                     onStartProgressive = {
                         route = AppRoute.Playing(Difficulty.EASY, progressiveMode = true)
@@ -259,6 +263,7 @@ private fun DifficultySelectScreen(
     game: GameDescriptor,
     statsByDifficulty: Map<Difficulty, GameStats>,
     onStartDifficulty: (Difficulty) -> Unit,
+    onStartLibGdxPrototype: (Difficulty) -> Unit,
     onStartProgressive: () -> Unit,
     onResetStats: () -> Unit,
     onBack: () -> Unit,
@@ -379,7 +384,7 @@ private fun DifficultySelectScreen(
                             border = BorderStroke(1.2.dp, accent.copy(alpha = 0.9f)),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(158.dp)
+                                .height(184.dp)
                                 .clickable { onStartDifficulty(difficulty) },
                         ) {
                             Column(
@@ -407,6 +412,18 @@ private fun DifficultySelectScreen(
                                     fontSize = 10.sp,
                                     fontFamily = FontFamily.Monospace,
                                 )
+                                TextButton(
+                                    onClick = { onStartLibGdxPrototype(difficulty) },
+                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 0.dp),
+                                ) {
+                                    Text(
+                                        text = "LIBGDX TEST",
+                                        color = accent,
+                                        fontSize = 10.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        letterSpacing = 0.7.sp,
+                                    )
+                                }
                             }
                         }
                     }
