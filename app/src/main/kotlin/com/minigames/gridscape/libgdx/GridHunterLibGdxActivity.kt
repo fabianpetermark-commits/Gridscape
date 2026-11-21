@@ -4,95 +4,62 @@ import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
-import android.util.Log
 import com.badlogic.gdx.backends.android.AndroidApplication
 import com.badlogic.gdx.backends.android.AndroidApplicationConfiguration
 import com.minigames.core.models.Difficulty
+import com.minigames.gridscape.diagnostics.DiagnosticLog
 
 class GridHunterLibGdxActivity : AndroidApplication() {
 
     companion object {
-        private const val TAG = "GridHunterLibGdx"
-
         fun createIntent(context: Context, difficulty: Difficulty): Intent =
             Intent(context, GridHunterLibGdxActivity::class.java)
                 .putExtra(GridHunterLibGdxContract.EXTRA_DIFFICULTY, difficulty.name)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        Log.d(TAG, "onCreate start")
-
-        // Global uncaught exception handler — megmutatja a hibát dialógusban,
-        // így Logcat nélkül is látható mi omlott össze és miért.
-        val defaultHandler = Thread.getDefaultUncaughtExceptionHandler()
-        Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
-            Log.e(TAG, "UNCAUGHT EXCEPTION on thread ${thread.name}", throwable)
-            val message = buildString {
-                append("Thread: ${thread.name}\n\n")
-                append("${throwable::class.java.simpleName}: ${throwable.message}\n\n")
-                throwable.stackTrace.take(8).forEach { append("  at $it\n") }
-                var cause = throwable.cause
-                while (cause != null) {
-                    append("\nCaused by: ${cause::class.java.simpleName}: ${cause.message}\n")
-                    cause.stackTrace.take(4).forEach { append("  at $it\n") }
-                    cause = cause.cause
-                }
-            }
-            try {
-                runOnUiThread {
-                    AlertDialog.Builder(this)
-                        .setTitle("GridHunter LibGDX Crash")
-                        .setMessage(message)
-                        .setPositiveButton("OK") { _, _ -> defaultHandler?.uncaughtException(thread, throwable) }
-                        .setCancelable(false)
-                        .show()
-                }
-            } catch (e: Exception) {
-                defaultHandler?.uncaughtException(thread, throwable)
-            }
-        }
-
+        DiagnosticLog.install(applicationContext)
+        DiagnosticLog.info("LibGDX Activity onCreate: entering; savedState=${savedInstanceState != null}")
         super.onCreate(savedInstanceState)
+        DiagnosticLog.info("LibGDX Activity onCreate: AndroidApplication super.onCreate completed")
 
         val config = AndroidApplicationConfiguration().apply {
             useImmersiveMode = true
             useWakelock = true
         }
-
-        val difficulty = intent.getStringExtra(GridHunterLibGdxContract.EXTRA_DIFFICULTY)
+        val rawDifficulty = intent.getStringExtra(GridHunterLibGdxContract.EXTRA_DIFFICULTY)
+        val difficulty = rawDifficulty
             ?.let { requested -> Difficulty.entries.firstOrNull { it.name == requested } }
             ?: Difficulty.EASY
-
-        Log.d(TAG, "Starting with difficulty=$difficulty")
+        DiagnosticLog.info("LibGDX Activity: difficulty extra=${rawDifficulty ?: "<missing>"}, resolved=$difficulty")
 
         try {
+            DiagnosticLog.info("LibGDX Activity: calling initialize()")
             initialize(GridHunterLibGdxGame(difficulty) { finish() }, config)
-        } catch (t: Throwable) {
-            Log.e(TAG, "initialize() failed", t)
-            val message = buildString {
-                append("initialize() dobott kivételt:\n\n")
-                append("${t::class.java.simpleName}: ${t.message}\n\n")
-                t.stackTrace.take(10).forEach { append("  at $it\n") }
-                var cause = t.cause
-                while (cause != null) {
-                    append("\nCaused by: ${cause::class.java.simpleName}: ${cause.message}\n")
-                    cause.stackTrace.take(5).forEach { append("  at $it\n") }
-                    cause = cause.cause
-                }
-            }
+            DiagnosticLog.info("LibGDX Activity: initialize() returned")
+        } catch (failure: Throwable) {
+            DiagnosticLog.error("LibGDX Activity: initialize() threw", failure)
             AlertDialog.Builder(this)
-                .setTitle("GridHunter LibGDX Crash")
-                .setMessage(message)
+                .setTitle("GridHunter indítási hiba")
+                .setMessage("${failure::class.java.name}: ${failure.message}\n\nA részletes napló a főmenü Diagnosztika pontjában található.")
                 .setPositiveButton("OK") { _, _ -> finish() }
                 .setCancelable(false)
                 .show()
         }
+    }
 
-        Log.d(TAG, "onCreate complete")
+    override fun onResume() {
+        DiagnosticLog.info("LibGDX Activity onResume")
+        super.onResume()
+    }
+
+    override fun onPause() {
+        DiagnosticLog.info("LibGDX Activity onPause")
+        super.onPause()
     }
 
     override fun onDestroy() {
-        Log.d(TAG, "onDestroy")
+        DiagnosticLog.info("LibGDX Activity onDestroy")
         super.onDestroy()
     }
 }
