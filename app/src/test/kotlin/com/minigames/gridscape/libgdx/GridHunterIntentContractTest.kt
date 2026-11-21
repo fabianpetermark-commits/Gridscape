@@ -12,6 +12,10 @@ import org.junit.jupiter.api.Test
  * [android.content.Intent] or running on a device. They cover the same code path that
  * is exercised when the "LIBGDX TEST" button is tapped in production.
  *
+ * The constant guard references [GridHunterLibGdxContract] (a plain Kotlin object) rather
+ * than [GridHunterLibGdxActivity] directly, because the Activity extends AndroidApplication
+ * and cannot be loaded on the JVM unit-test runner.
+ *
  * Run with: ./gradlew :app:test
  */
 class GridHunterIntentContractTest {
@@ -103,6 +107,9 @@ class GridHunterIntentContractTest {
 
     @Test
     fun `EXTRA_DIFFICULTY constant has the expected fully-qualified value`() {
+        // Reference GridHunterLibGdxContract (plain Kotlin object, no Android deps)
+        // rather than GridHunterLibGdxActivity, which extends AndroidApplication and
+        // cannot be loaded on the JVM unit-test runner.
         assertEquals(
             "com.minigames.gridscape.extra.GRID_HUNTER_DIFFICULTY",
             GridHunterLibGdxContract.EXTRA_DIFFICULTY,
